@@ -25,6 +25,11 @@ class ClienteApi {
   Future<Map<String, dynamic>> get(String caminho, {Map<String, String>? parametros}) async =>
       _json(await _enviar('GET', caminho, parametros: parametros));
 
+  Future<List<dynamic>> getLista(String caminho) async {
+    final r = await _enviar('GET', caminho);
+    return r.body.isEmpty ? const [] : jsonDecode(utf8.decode(r.bodyBytes)) as List<dynamic>;
+  }
+
   Future<Map<String, dynamic>> post(String caminho, Object? corpo) async =>
       _json(await _enviar('POST', caminho, corpo: corpo));
 
@@ -35,7 +40,7 @@ class ClienteApi {
   Future<http.Response> _enviar(String metodo, String caminho, {Object? corpo, Map<String, String>? parametros}) async {
     final uri = base.replace(
       path: '${base.path.replaceAll(RegExp(r'/$'), '')}$caminho',
-      queryParameters: parametros,
+      queryParameters: (parametros == null || parametros.isEmpty) ? null : parametros,
     );
     final pedido = http.Request(metodo, uri)
       ..headers.addAll({

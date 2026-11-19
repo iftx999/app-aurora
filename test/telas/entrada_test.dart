@@ -5,13 +5,13 @@ import 'package:aurora_campo/app/dependencias.dart';
 import 'package:aurora_campo/autenticacao/biometria.dart';
 import 'package:aurora_campo/autenticacao/cofre.dart';
 import 'package:aurora_campo/autenticacao/provedor_identidade.dart';
-import 'package:aurora_campo/dados/api/api_campo.dart';
-import 'package:aurora_campo/dados/api/cliente_api.dart';
-import 'package:aurora_campo/dados/api/erros.dart';
+import 'package:aurora_campo/dados/local/armazem_do_dia.dart';
 import 'package:aurora_campo/nucleo/configuracao.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import '../apoio.dart';
 
 class IdentidadeFalsa implements ProvedorIdentidade {
   @override
@@ -36,33 +36,6 @@ class SemBiometria implements Biometria {
   Future<bool> disponivel() async => false;
 }
 
-class ApiFalsa extends ApiCampo {
-  ApiFalsa({this.revogado = false})
-    : super(
-        ClienteApi(base: Uri.parse('http://api'), credenciais: _SemCredenciais()),
-        () async => const InfoDoAparelho(modelo: 'Teste', sistema: 'Android 15', versaoApp: '1.0.0+1'),
-      );
-
-  final bool revogado;
-  int cadastros = 0;
-
-  @override
-  Future<void> cadastrarCelular() async {
-    cadastros++;
-    if (revogado) {
-      throw const ErroDaApi(403, 'Bloqueado', codigo: 'DISPOSITIVO_REVOGADO');
-    }
-  }
-}
-
-class _SemCredenciais implements Credenciais {
-  @override
-  Future<String> dispositivoId() async => 'd';
-
-  @override
-  Future<String> tokenDeAcesso() async => 't';
-}
-
 Future<void> digitar(WidgetTester tester, String pin) async {
   for (final d in pin.split('')) {
     await tester.tap(find.bySemanticsLabel('Número $d'));
@@ -81,6 +54,9 @@ void main() {
       identidadeProvider.overrideWithValue(IdentidadeFalsa()),
       biometriaProvider.overrideWithValue(SemBiometria()),
       apiCampoProvider.overrideWithValue(api),
+      armazemProvider.overrideWithValue(ArmazemEmMemoria()),
+      localizacaoProvider.overrideWithValue(GpsFalso()),
+      relogioProvider.overrideWithValue(() => agoraDosTestes),
     ],
     child: const AuroraApp(),
   );
@@ -111,7 +87,9 @@ void main() {
     expect(find.text('Bom dia, Ana'), findsOneWidget);
 
     // Bloqueia: PIN errado avisa quantas tentativas restam; o certo abre.
-    await tester.tap(find.byTooltip('Bloquear'));
+    await tester.tap(find.byTooltip('Mais opções'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Bloquear'));
     await tester.pumpAndSettle();
     expect(find.text('Olá, Ana. Digite o PIN para desbloquear.'), findsOneWidget);
     await digitar(tester, '000001');

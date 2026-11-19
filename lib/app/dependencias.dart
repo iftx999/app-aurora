@@ -9,12 +9,17 @@ import '../autenticacao/provedor_identidade.dart';
 import '../autenticacao/sessao.dart';
 import '../dados/api/api_campo.dart';
 import '../dados/api/cliente_api.dart';
+import '../dados/local/armazem_do_dia.dart';
+import '../dados/localizacao.dart';
 import '../nucleo/configuracao.dart';
 
 /// Peças do app; os testes trocam por versões falsas com `overrides`.
 final configuracaoProvider = Provider<Configuracao>((ref) => Configuracao.doAmbiente());
 final cofreProvider = Provider<Cofre>((ref) => CofreSeguro());
 final identidadeProvider = Provider<ProvedorIdentidade>((ref) => ProvedorAppAuth(ref.watch(configuracaoProvider)));
+final armazemProvider = Provider<ArmazemDoDia>((ref) => ArmazemSqlCipher(ref.watch(cofreProvider)));
+final localizacaoProvider = Provider<Localizacao>((ref) => LocalizacaoDoAparelho());
+final relogioProvider = Provider<DateTime Function()>((ref) => DateTime.now);
 final biometriaProvider = Provider<Biometria>((ref) => BiometriaDoAparelho());
 final infoDoAparelhoProvider = Provider<Future<InfoDoAparelho> Function()>((ref) => () async {
   final android = await DeviceInfoPlugin().androidInfo;
@@ -42,6 +47,7 @@ class ControleDaSessao extends Notifier<EstadoSessao> {
       aoMudar: (novo) => state = novo,
     );
     sessao.cadastrarCelular = () => ref.read(apiCampoProvider).cadastrarCelular();
+    sessao.apagarDadosLocais = () => ref.read(armazemProvider).apagar();
     Future.microtask(sessao.iniciar);
     return const Carregando();
   }

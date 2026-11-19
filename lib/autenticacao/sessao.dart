@@ -94,6 +94,7 @@ class Sessao implements Credenciais {
   }
 
   Future<void> trocarEmpresa() async {
+    await apagarDadosLocais?.call();
     await _esquecerSessao();
     await cofre.apagar(ChavesDoCofre.pinResumo);
     await cofre.apagar(ChavesDoCofre.pinSal);
