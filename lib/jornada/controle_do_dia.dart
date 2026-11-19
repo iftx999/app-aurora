@@ -9,6 +9,7 @@ import '../dados/local/armazem_do_dia.dart';
 import '../dados/localizacao.dart';
 import '../dados/modelos/dia.dart';
 import '../dados/modelos/evento.dart';
+import '../dados/modelos/foto.dart';
 import '../sincronizacao/controle_da_fila.dart';
 
 /// O dia no celular: equipes, pacote baixado e jornada (J8; 10.9.2).
@@ -200,6 +201,7 @@ class ControleDoDia extends Notifier<EstadoDoDia> {
     String? resultado,
     num? quantidade,
     Map<String, dynamic>? valores,
+    List<FotoDaOs> fotos = const [],
   }) async {
     final ordem = state.pacote?.ordens.where((o) => o.id == osId).firstOrNull;
     if (ordem == null || acao.destino(ordem.status) == null) {
@@ -231,6 +233,7 @@ class ControleDoDia extends Notifier<EstadoDoDia> {
             posicao: posicao?.paraJson().cast<String, dynamic>(),
             versaoPacote: _doServidor?.versao,
           ),
+          fotos: fotos,
         );
     await _mostrar();
   }

@@ -110,6 +110,7 @@ class OrdemDoDia {
   String get id => json['id'] as String;
   int get numero => (json['numero'] as num).toInt();
   String get servicoNome => json['servicoNome'] as String;
+  String? get servicoId => json['servicoId'] as String?;
   String get unidadeMedida => json['unidadeMedida'] as String;
   bool get noTrecho => json['alvo'] == 'TRECHO';
   String? get matricula => json['matricula'] as String?;
@@ -152,6 +153,15 @@ class ParametroDoServico {
   String get rotulo => json['rotulo'] as String;
   String get tipo => json['tipo'] as String;
   bool get obrigatorio => json['obrigatorio'] as bool? ?? false;
+  String? get ajuda => json['ajuda'] as String?;
+  String? get unidade => json['unidade'] as String?;
+  num? get minimo => json['minimo'] as num?;
+  num? get maximo => json['maximo'] as num?;
+  List<String> get opcoes => (json['opcoes'] as List? ?? const []).cast<String>();
+
+  /// Só vale quando o parâmetro [condicaoChave] tem o valor [condicaoValor].
+  String? get condicaoChave => json['condicaoChave'] as String?;
+  String? get condicaoValor => json['condicaoValor'] as String?;
 }
 
 class MotivoDoCampo {
@@ -206,6 +216,10 @@ class PacoteDoDia {
       ((json['parametros'] as Map<String, dynamic>)[servicoVersaoId] as List? ?? const [])
           .map((p) => ParametroDoServico(p as Map<String, dynamic>))
           .toList();
+
+  /// Motivos do [tipo] (PARALISACAO, DEVOLUCAO, NAO_EXECUCAO) que valem para o serviço da OS.
+  List<MotivoDoCampo> motivosPara(String tipo, OrdemDoDia ordem) =>
+      motivos.where((m) => m.tipo == tipo && (m.servicoId == null || m.servicoId == ordem.servicoId)).toList();
 
   List<MotivoDoCampo> get motivos =>
       (json['motivos'] as List).map((m) => MotivoDoCampo(m as Map<String, dynamic>)).toList();

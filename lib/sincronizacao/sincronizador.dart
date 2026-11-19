@@ -2,8 +2,10 @@ import 'dart:async';
 
 import '../dados/api/api_campo.dart';
 import '../dados/api/erros.dart';
+import '../dados/local/arquivos_de_foto.dart';
 import '../dados/local/armazem_do_dia.dart';
 import '../dados/modelos/evento.dart';
+import '../dados/modelos/foto.dart';
 
 /// Como está a fila (J10: "x ações pendentes · último envio hh:mm").
 class EstadoDaFila {
@@ -17,6 +19,8 @@ class EstadoDaFila {
     this.avisos = const [],
     this.versao = 0,
     this.recebimentos = 0,
+    this.fotosPendentes = 0,
+    this.avisosDeFoto = const [],
   });
 
   final int pendentes;
@@ -38,6 +42,14 @@ class EstadoDaFila {
 
   /// Quantos envios o servidor já recebeu nesta abertura (quem mostra o dia baixa as mudanças do pacote).
   final int recebimentos;
+
+  final int fotosPendentes;
+
+  /// Fotos que o servidor recusou (o texto vai para o agente).
+  final List<String> avisosDeFoto;
+
+  /// Nada esperando envio.
+  bool get vazia => pendentes == 0 && fotosPendentes == 0;
 }
 
 /// Envia a fila em lotes, na ordem em que as ações foram feitas, com novas tentativas em intervalos crescentes
@@ -46,6 +58,7 @@ class Sincronizador {
   Sincronizador({
     required this.armazem,
     required this.api,
+    required this.arquivos,
     DateTime Function()? agora,
     this.aoMudar,
     this.aoRevogar,
@@ -59,12 +72,17 @@ class Sincronizador {
       Duration(minutes: 5),
     ],
     this.tamanhoDoLote = 200,
+    this.parteDaFoto = 1024 * 1024,
   }) : _agora = agora ?? DateTime.now {
     _desde = _agora();
   }
 
   final ArmazemDoDia armazem;
   final ApiCampo api;
+  final ArquivosDeFoto arquivos;
+
+  /// Tamanho de cada parte de foto (o servidor aceita até 1 MB).
+  final int parteDaFoto;
   final DateTime Function() _agora;
   final List<Duration> esperas;
   final int tamanhoDoLote;
@@ -101,6 +119,8 @@ class Sincronizador {
     String? Function()? problema,
     List<EventoNaFila>? avisos,
     int? recebimentos,
+    int? fotosPendentes,
+    List<String>? avisosDeFoto,
   }) => EstadoDaFila(
     pendentes: pendentes ?? _estado.pendentes,
     ultimoEnvio: ultimoEnvio ?? _estado.ultimoEnvio,
@@ -111,17 +131,20 @@ class Sincronizador {
     avisos: avisos ?? _estado.avisos,
     versao: _estado.versao + 1,
     recebimentos: recebimentos ?? _estado.recebimentos,
+    fotosPendentes: fotosPendentes ?? _estado.fotosPendentes,
+    avisosDeFoto: avisosDeFoto ?? _estado.avisosDeFoto,
   );
 
   /// Relê a contagem do banco (abertura do app, evento novo).
   Future<void> recontar() async {
     final pendentes = (await armazem.eventos(soPendentes: true)).length;
-    _mudar(_com(pendentes: pendentes));
+    final fotos = (await armazem.fotos(soPendentes: true)).length;
+    _mudar(_com(pendentes: pendentes, fotosPendentes: fotos));
   }
 
-  /// Guarda o evento e tenta enviar logo (sem esperar o envio).
-  Future<void> registrar(EventoDeCampo evento) async {
-    await armazem.registrarEvento(evento);
+  /// Guarda o evento (com as fotos que ele referencia) e tenta enviar logo (sem esperar o envio).
+  Future<void> registrar(EventoDeCampo evento, {List<FotoDaOs> fotos = const []}) async {
+    await armazem.registrarEvento(evento, fotos: fotos);
     await recontar();
     unawaited(enviar());
   }
@@ -135,7 +158,7 @@ class Sincronizador {
   /// O agente já viu esses avisos.
   void dispensarAvisos() {
     _avisados.addAll(_estado.avisos.map((e) => e.evento.id));
-    _mudar(_com(avisos: const []));
+    _mudar(_com(avisos: const [], avisosDeFoto: const []));
   }
 
   /// Revogação ou troca de empresa: envia o que der e para, sem avisar a revogação de novo.
@@ -164,6 +187,10 @@ class Sincronizador {
         if (r == null) break;
         recebeu = true;
         revogado = revogado || r;
+        _mudar(_com(ultimoEnvio: _agora(), falhasSeguidas: 0));
+      }
+      // Fotos depois dos eventos (10.9.3); celular revogado não envia mais nada além dos eventos.
+      if (!_parado && !revogado && await _enviarFotos()) {
         _mudar(_com(ultimoEnvio: _agora(), falhasSeguidas: 0));
       }
     } on SemConexao {
@@ -213,6 +240,66 @@ class Sincronizador {
     }
   }
 
+  /// Envia as fotos pendentes, uma a uma, retomando de onde cada uma parou. Devolve se alguma parte chegou.
+  Future<bool> _enviarFotos() async {
+    var chegou = false;
+    // Foto de encerramento que não valeu (recusado ou superado) não tem para onde ir.
+    final semEfeito = {
+      for (final e in await armazem.eventos())
+        if (!e.situacao.valeNoCelular)
+          for (final v in (e.evento.valores ?? const {}).values)
+            if (v is List) ...v.whereType<String>(),
+    };
+    for (final foto in await armazem.fotos(soPendentes: true)) {
+      if (_parado) break;
+      if (semEfeito.contains(foto.id)) {
+        await arquivos.apagar(foto.caminho);
+        await armazem.esquecerFoto(foto.id);
+        continue;
+      }
+      var atual = foto;
+      if (atual.recebido > 0) {
+        // Já começou antes: pergunta ao servidor até onde chegou (a última parte pode ter chegado sem resposta).
+        atual = _comServidor(atual, await api.estadoDaFoto(atual.id));
+      }
+      var conflitos = 0;
+      while (atual.situacao == SituacaoDaFoto.pendente) {
+        final fim = (atual.recebido + parteDaFoto).clamp(0, atual.tamanho);
+        try {
+          final bytes = await arquivos.ler(atual.caminho, atual.recebido, fim);
+          atual = _comServidor(atual, await api.enviarParteDaFoto(atual, atual.recebido, bytes));
+          chegou = true;
+        } on ErroDaApi catch (e) {
+          if (e.celularRevogado) rethrow;
+          if (e.status == 409 && conflitos++ < 3) {
+            // O servidor está em outro ponto do arquivo: retoma de lá.
+            atual = _comServidor(atual, await api.estadoDaFoto(atual.id));
+          } else if (const {400, 403, 404, 409, 413, 415, 422}.contains(e.status)) {
+            // 404/403: a OS não está mais com a equipe da pessoa.
+            atual = atual.com(situacao: SituacaoDaFoto.recusada, recusa: e.mensagem);
+          } else {
+            rethrow;
+          }
+        }
+        await armazem.atualizarFoto(atual);
+      }
+      if (atual.situacao == SituacaoDaFoto.recusada) {
+        _mudar(_com(avisosDeFoto: [..._estado.avisosDeFoto, 'Foto recusada: ${atual.recusa ?? 'arquivo inválido'}.']));
+      }
+      // Enviada ou recusada: o arquivo sai do celular.
+      await arquivos.apagar(atual.caminho);
+      await armazem.esquecerFoto(atual.id);
+    }
+    return chegou;
+  }
+
+  static FotoDaOs _comServidor(FotoDaOs foto, AnexoNoServidor? servidor) => switch (servidor?.situacao) {
+    null => foto.com(recebido: 0),
+    'DISPONIVEL' => foto.com(situacao: SituacaoDaFoto.enviada, recebido: foto.tamanho),
+    'RECUSADO' => foto.com(situacao: SituacaoDaFoto.recusada, recusa: servidor!.recusa),
+    _ => foto.com(recebido: servidor!.recebido),
+  };
+
   Future<void> _depoisDoEnvio() async {
     // Respondidos há mais de 2 dias saem do celular.
     await armazem.esquecerRespondidos(_agora().subtract(const Duration(days: 2)));
@@ -227,6 +314,7 @@ class Sincronizador {
       _com(
         enviando: false,
         pendentes: todos.where((e) => e.situacao == SituacaoDoEnvio.pendente).length,
+        fotosPendentes: (await armazem.fotos(soPendentes: true)).length,
         avisos: avisos,
       ),
     );

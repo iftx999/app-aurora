@@ -15,6 +15,7 @@ class ControleDaFila extends Notifier<EstadoDaFila> {
     final s = Sincronizador(
       armazem: ref.watch(armazemProvider),
       api: ref.watch(apiCampoProvider),
+      arquivos: ref.watch(arquivosDeFotoProvider),
       agora: ref.watch(relogioProvider),
     );
     s

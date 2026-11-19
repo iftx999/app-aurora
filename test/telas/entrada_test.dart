@@ -5,6 +5,7 @@ import 'package:aurora_campo/app/dependencias.dart';
 import 'package:aurora_campo/autenticacao/biometria.dart';
 import 'package:aurora_campo/autenticacao/cofre.dart';
 import 'package:aurora_campo/autenticacao/provedor_identidade.dart';
+import 'package:aurora_campo/dados/local/arquivos_de_foto.dart';
 import 'package:aurora_campo/dados/local/armazem_do_dia.dart';
 import 'package:aurora_campo/nucleo/configuracao.dart';
 import 'package:flutter/material.dart';
@@ -55,6 +56,7 @@ void main() {
       biometriaProvider.overrideWithValue(SemBiometria()),
       apiCampoProvider.overrideWithValue(api),
       armazemProvider.overrideWithValue(ArmazemEmMemoria()),
+      arquivosDeFotoProvider.overrideWithValue(ArquivosEmMemoria()),
       localizacaoProvider.overrideWithValue(GpsFalso()),
       relogioProvider.overrideWithValue(() => agoraDosTestes),
     ],

@@ -1,5 +1,6 @@
 import 'package:aurora_campo/app/dependencias.dart';
 import 'package:aurora_campo/autenticacao/cofre.dart';
+import 'package:aurora_campo/dados/local/arquivos_de_foto.dart';
 import 'package:aurora_campo/dados/local/armazem_do_dia.dart';
 import 'package:aurora_campo/dados/localizacao.dart';
 import 'package:aurora_campo/dados/modelos/dia.dart';
@@ -26,6 +27,7 @@ void main() {
       overrides: [
         apiCampoProvider.overrideWithValue(api),
         armazemProvider.overrideWithValue(armazem),
+        arquivosDeFotoProvider.overrideWithValue(ArquivosEmMemoria()),
         localizacaoProvider.overrideWithValue(gps),
         relogioProvider.overrideWithValue(() => agoraDosTestes),
         cofreProvider.overrideWithValue(CofreEmMemoria()),

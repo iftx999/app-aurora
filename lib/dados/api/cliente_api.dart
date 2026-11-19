@@ -14,8 +14,12 @@ abstract interface class Credenciais {
 
 /// HTTP da API de campo: token, cabeçalho do celular (`X-Aurora-Dispositivo`), JSON e erros em Problem Details.
 class ClienteApi {
-  ClienteApi({required this.base, required this.credenciais, http.Client? http_, this.tempoLimite = const Duration(seconds: 20)})
-    : _http = http_ ?? http.Client();
+  ClienteApi({
+    required this.base,
+    required this.credenciais,
+    http.Client? http_,
+    this.tempoLimite = const Duration(seconds: 20),
+  }) : _http = http_ ?? http.Client();
 
   final Uri base;
   final Credenciais credenciais;
@@ -37,7 +41,22 @@ class ClienteApi {
     await _enviar('POST', caminho, corpo: corpo);
   }
 
-  Future<http.Response> _enviar(String metodo, String caminho, {Object? corpo, Map<String, String>? parametros}) async {
+  /// Corpo binário (partes de foto) com cabeçalhos próprios; devolve o JSON da resposta.
+  Future<Map<String, dynamic>> putBytes(
+    String caminho,
+    List<int> bytes, {
+    required Map<String, String> cabecalhos,
+    Map<String, String>? parametros,
+  }) async => _json(await _enviar('PUT', caminho, bytes: bytes, cabecalhos: cabecalhos, parametros: parametros));
+
+  Future<http.Response> _enviar(
+    String metodo,
+    String caminho, {
+    Object? corpo,
+    Map<String, String>? parametros,
+    List<int>? bytes,
+    Map<String, String>? cabecalhos,
+  }) async {
     final uri = base.replace(
       path: '${base.path.replaceAll(RegExp(r'/$'), '')}$caminho',
       queryParameters: (parametros == null || parametros.isEmpty) ? null : parametros,
@@ -48,6 +67,8 @@ class ClienteApi {
         'X-Aurora-Dispositivo': await credenciais.dispositivoId(),
         'Accept': 'application/json',
       });
+    if (cabecalhos != null) pedido.headers.addAll(cabecalhos);
+    if (bytes != null) pedido.bodyBytes = bytes;
     if (corpo != null) {
       pedido
         ..headers['Content-Type'] = 'application/json'
@@ -78,8 +99,11 @@ class ClienteApi {
   static ErroDaApi _erro(http.Response r) {
     try {
       final p = jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>;
-      return ErroDaApi(r.statusCode, (p['detail'] ?? p['title'] ?? 'Erro ${r.statusCode}') as String,
-          codigo: p['codigo'] as String?);
+      return ErroDaApi(
+        r.statusCode,
+        (p['detail'] ?? p['title'] ?? 'Erro ${r.statusCode}') as String,
+        codigo: p['codigo'] as String?,
+      );
     } on FormatException {
       return ErroDaApi(r.statusCode, 'Erro ${r.statusCode}');
     }

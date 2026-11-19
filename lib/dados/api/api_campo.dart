@@ -1,5 +1,7 @@
 import '../modelos/dia.dart';
 import '../modelos/evento.dart';
+import '../modelos/foto.dart';
+import 'erros.dart';
 import 'cliente_api.dart';
 
 /// Modelo, sistema e versão do app, enviados no cadastro do celular (J13).
@@ -81,4 +83,28 @@ class ApiCampo {
       revogado: r['revogado'] as bool? ?? false,
     );
   }
+
+  /// Quanto da foto o servidor já tem; nulo se nada chegou ainda.
+  Future<AnexoNoServidor?> estadoDaFoto(String id) async {
+    try {
+      return AnexoNoServidor.deJson(await _cliente.get('/api/v1/campo/anexos/$id'));
+    } on ErroDaApi catch (e) {
+      if (e.status == 404) return null;
+      rethrow;
+    }
+  }
+
+  /// Uma parte da foto, de [inicio] em diante (até 1 MB; 10.9.3).
+  Future<AnexoNoServidor> enviarParteDaFoto(FotoDaOs foto, int inicio, List<int> bytes) async => AnexoNoServidor.deJson(
+    await _cliente.putBytes(
+      '/api/v1/campo/anexos/${foto.id}',
+      bytes,
+      parametros: {'os': foto.osId, 'parametro': foto.parametro},
+      cabecalhos: {
+        'Content-Type': foto.tipoMidia,
+        'Content-Range': 'bytes $inicio-${inicio + bytes.length - 1}/${foto.tamanho}',
+        'X-Conteudo-Sha256': foto.sha256,
+      },
+    ),
+  );
 }

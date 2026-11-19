@@ -9,6 +9,8 @@ import '../autenticacao/provedor_identidade.dart';
 import '../autenticacao/sessao.dart';
 import '../dados/api/api_campo.dart';
 import '../dados/api/cliente_api.dart';
+import '../dados/camera.dart';
+import '../dados/local/arquivos_de_foto.dart';
 import '../dados/local/armazem_do_dia.dart';
 import '../dados/localizacao.dart';
 import '../nucleo/configuracao.dart';
@@ -18,6 +20,8 @@ final configuracaoProvider = Provider<Configuracao>((ref) => Configuracao.doAmbi
 final cofreProvider = Provider<Cofre>((ref) => CofreSeguro());
 final identidadeProvider = Provider<ProvedorIdentidade>((ref) => ProvedorAppAuth(ref.watch(configuracaoProvider)));
 final armazemProvider = Provider<ArmazemDoDia>((ref) => ArmazemSqlCipher(ref.watch(cofreProvider)));
+final arquivosDeFotoProvider = Provider<ArquivosDeFoto>((ref) => ArquivosNoAparelho());
+final cameraProvider = Provider<Camera>((ref) => CameraDoAparelho());
 final localizacaoProvider = Provider<Localizacao>((ref) => LocalizacaoDoAparelho());
 final relogioProvider = Provider<DateTime Function()>((ref) => DateTime.now);
 final biometriaProvider = Provider<Biometria>((ref) => BiometriaDoAparelho());
@@ -58,6 +62,7 @@ class ControleDaSessao extends Notifier<EstadoSessao> {
         // Sem como enviar: apaga assim mesmo (o servidor registra o celular como revogado).
       }
       await ref.read(armazemProvider).apagar();
+      await ref.read(arquivosDeFotoProvider).apagarTudo();
       try {
         await ref.read(apiCampoProvider).confirmarApagado();
       } on Exception {

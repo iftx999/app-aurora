@@ -4,6 +4,8 @@ import 'package:aurora_campo/dados/api/erros.dart';
 import 'package:aurora_campo/dados/localizacao.dart';
 import 'package:aurora_campo/dados/modelos/dia.dart';
 import 'package:aurora_campo/dados/modelos/evento.dart';
+import 'package:aurora_campo/dados/modelos/foto.dart';
+import 'package:aurora_campo/dados/camera.dart';
 
 /// Quarta, 18/11/2026, 09:00 (hora local).
 final agoraDosTestes = DateTime(2026, 11, 18, 9);
@@ -55,6 +57,7 @@ Map<String, dynamic> pacoteJson({
   List<String>? ids,
   bool jornadaAberta = true,
   DateTime? gerado,
+  List<Map<String, dynamic>>? parametros,
 }) {
   final lista =
       ordens ??
@@ -79,13 +82,32 @@ Map<String, dynamic> pacoteJson({
         : null,
     'ids': ids ?? [for (final o in lista) (o['ordem'] as Map)['id']],
     'ordens': lista,
+    // Como o servidor: a diferença só traz os parâmetros das versões das OS alteradas.
     'parametros': {
-      'v1': [
-        {'chave': 'obs', 'rotulo': 'Observação', 'tipo': 'TEXTO', 'obrigatorio': false},
-      ],
+      if (!diferenca || parametros != null || lista.isNotEmpty)
+        'v1':
+            parametros ??
+            [
+              {'chave': 'obs', 'rotulo': 'Observação', 'tipo': 'TEXTO', 'obrigatorio': false},
+            ],
     },
     'motivos': [
       {'id': 'm1', 'tipo': 'PARALISACAO', 'codigo': 'CHUVA', 'nome': 'Chuva forte', 'exigeObservacao': false},
+      {'id': 'm2', 'tipo': 'PARALISACAO', 'codigo': 'OUTRO', 'nome': 'Outro', 'exigeObservacao': true},
+      {
+        'id': 'm3',
+        'tipo': 'DEVOLUCAO',
+        'codigo': 'ENDERECO',
+        'nome': 'Endereço não encontrado',
+        'exigeObservacao': false,
+      },
+      {
+        'id': 'm4',
+        'tipo': 'NAO_EXECUCAO',
+        'codigo': 'SEM_INTERESSE',
+        'nome': 'Morador sem interesse',
+        'exigeObservacao': false,
+      },
     ],
     'raioInicioM': 150,
     'geradoEm': (gerado ?? agoraDosTestes).toUtc().toIso8601String(),
@@ -139,6 +161,36 @@ class ApiFalsa extends ApiCampo {
   Future<void> confirmarApagado() async {
     _rede();
     confirmacoesDeApagado++;
+  }
+
+  /// Fotos no "servidor": id → bytes recebidos; [recusarFoto] devolve RECUSADO no fim.
+  final fotosRecebidas = <String, List<int>>{};
+  final partes = <({String id, int inicio, int tamanho})>[];
+  bool recusarFoto = false;
+
+  /// Perde a resposta desta parte (o servidor recebeu, o celular não soube).
+  int? perderRespostaDaParte;
+
+  @override
+  Future<AnexoNoServidor?> estadoDaFoto(String id) async {
+    _rede();
+    final b = fotosRecebidas[id];
+    return b == null ? null : AnexoNoServidor(recebido: b.length, situacao: 'RECEBENDO');
+  }
+
+  @override
+  Future<AnexoNoServidor> enviarParteDaFoto(FotoDaOs foto, int inicio, List<int> bytes) async {
+    _rede();
+    final atual = fotosRecebidas[foto.id] ?? <int>[];
+    if (inicio != atual.length) throw const ErroDaApi(409, 'Parte fora de ordem.');
+    fotosRecebidas[foto.id] = [...atual, ...bytes];
+    partes.add((id: foto.id, inicio: inicio, tamanho: bytes.length));
+    if (perderRespostaDaParte == partes.length) throw const SemConexao('resposta perdida');
+    final recebido = fotosRecebidas[foto.id]!.length;
+    if (recebido < foto.tamanho) return AnexoNoServidor(recebido: recebido, situacao: 'RECEBENDO');
+    return recusarFoto
+        ? AnexoNoServidor(recebido: recebido, situacao: 'RECUSADO', recusa: 'o conteúdo não é image/jpeg')
+        : AnexoNoServidor(recebido: recebido, situacao: 'DISPONIVEL');
   }
 
   void _rede() {
@@ -224,3 +276,10 @@ const equipesDeTeste = [
     veiculoNome: 'Caminhonete',
   ),
 ];
+
+class CameraFalsa implements Camera {
+  int fotos = 0;
+
+  @override
+  Future<String?> tirar() async => '/cache/foto${++fotos}.jpg';
+}

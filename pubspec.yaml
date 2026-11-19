@@ -52,6 +52,8 @@ dependencies:
   url_launcher: ^6.3.3
   geolocator_android: ^5.2.1
   geolocator_platform_interface: ^4.4.1
+  image_picker: ^1.2.4
+  path_provider: ^2.1.6
 
 dev_dependencies:
   flutter_test:

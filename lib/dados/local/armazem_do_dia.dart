@@ -6,6 +6,7 @@ import 'package:sqflite_sqlcipher/sqflite.dart';
 
 import '../../autenticacao/cofre.dart';
 import '../modelos/evento.dart';
+import '../modelos/foto.dart';
 
 /// Início de jornada feito sem sinal, enviado quando a conexão voltar.
 class InicioPendente {
@@ -44,7 +45,15 @@ abstract interface class ArmazemDoDia {
   Future<void> guardarInicioPendente(InicioPendente? inicio);
 
   /// Guarda o evento no fim da fila (numa transação: ou entra inteiro, ou não entra).
-  Future<void> registrarEvento(EventoDeCampo evento);
+  /// Com as [fotos] que o evento referencia, na mesma transação.
+  Future<void> registrarEvento(EventoDeCampo evento, {List<FotoDaOs> fotos = const []});
+
+  /// Na ordem em que foram registradas.
+  Future<List<FotoDaOs>> fotos({bool soPendentes = false});
+  Future<void> atualizarFoto(FotoDaOs foto);
+
+  /// Fotos já resolvidas (enviadas ou recusadas) saem do banco; o arquivo é apagado por quem chama.
+  Future<void> esquecerFoto(String id);
 
   /// Na ordem em que foram registrados; [soPendentes] = os que o servidor ainda não recebeu.
   Future<List<EventoNaFila>> eventos({bool soPendentes = false, int? limite});
@@ -89,13 +98,15 @@ class ArmazemSqlCipher implements ArmazemDoDia {
     return openDatabase(
       local,
       password: chave,
-      version: 2,
+      version: 3,
       onCreate: (db, _) async {
         await db.execute(_valor);
         await db.execute(_evento);
+        await db.execute(_anexo);
       },
       onUpgrade: (db, de, _) async {
         if (de < 2) await db.execute(_evento);
+        if (de < 3) await db.execute(_anexo);
       },
     );
   }
@@ -103,6 +114,22 @@ class ArmazemSqlCipher implements ArmazemDoDia {
   static const _valor = 'CREATE TABLE valor (chave TEXT PRIMARY KEY, json TEXT NOT NULL)';
 
   // ordem: autoincremento = ordem de registro, que é a ordem de envio.
+  static const _anexo = '''
+    CREATE TABLE anexo (
+      ordem INTEGER PRIMARY KEY AUTOINCREMENT,
+      id TEXT NOT NULL UNIQUE,
+      os_id TEXT NOT NULL,
+      parametro TEXT NOT NULL,
+      caminho TEXT NOT NULL,
+      tipo_midia TEXT NOT NULL,
+      tamanho INTEGER NOT NULL,
+      sha256 TEXT NOT NULL,
+      tirada_em TEXT NOT NULL,
+      situacao TEXT NOT NULL DEFAULT 'pendente',
+      recebido INTEGER NOT NULL DEFAULT 0,
+      recusa TEXT
+    )''';
+
   static const _evento = '''
     CREATE TABLE evento (
       ordem INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -159,16 +186,68 @@ class ArmazemSqlCipher implements ArmazemDoDia {
   Future<void> guardarInicioPendente(InicioPendente? inicio) => _escrever('inicio_pendente', inicio?.paraJson());
 
   @override
-  Future<void> registrarEvento(EventoDeCampo evento) async {
+  Future<void> registrarEvento(EventoDeCampo evento, {List<FotoDaOs> fotos = const []}) async {
     final db = await _abrir();
-    await db.transaction(
-      (t) => t.insert('evento', {
+    await db.transaction((t) async {
+      await t.insert('evento', {
         'id': evento.id,
         'os_id': evento.osId,
         'sequencia': evento.sequencia,
         'json': jsonEncode(evento.paraJson()),
-      }),
+      });
+      for (final f in fotos) {
+        await t.insert('anexo', {
+          'id': f.id,
+          'os_id': f.osId,
+          'parametro': f.parametro,
+          'caminho': f.caminho,
+          'tipo_midia': f.tipoMidia,
+          'tamanho': f.tamanho,
+          'sha256': f.sha256,
+          'tirada_em': f.tiradaEm.toIso8601String(),
+        });
+      }
+    });
+  }
+
+  @override
+  Future<List<FotoDaOs>> fotos({bool soPendentes = false}) async {
+    final linhas = await (await _abrir()).query(
+      'anexo',
+      where: soPendentes ? "situacao = 'pendente'" : null,
+      orderBy: 'ordem',
     );
+    return [
+      for (final l in linhas)
+        FotoDaOs(
+          id: l['id'] as String,
+          osId: l['os_id'] as String,
+          parametro: l['parametro'] as String,
+          caminho: l['caminho'] as String,
+          tipoMidia: l['tipo_midia'] as String,
+          tamanho: l['tamanho'] as int,
+          sha256: l['sha256'] as String,
+          tiradaEm: DateTime.parse(l['tirada_em'] as String),
+          situacao: SituacaoDaFoto.values.byName(l['situacao'] as String),
+          recebido: l['recebido'] as int,
+          recusa: l['recusa'] as String?,
+        ),
+    ];
+  }
+
+  @override
+  Future<void> atualizarFoto(FotoDaOs foto) async {
+    await (await _abrir()).update(
+      'anexo',
+      {'situacao': foto.situacao.name, 'recebido': foto.recebido, 'recusa': foto.recusa},
+      where: 'id = ?',
+      whereArgs: [foto.id],
+    );
+  }
+
+  @override
+  Future<void> esquecerFoto(String id) async {
+    await (await _abrir()).delete('anexo', where: 'id = ?', whereArgs: [id]);
   }
 
   @override
@@ -250,6 +329,7 @@ class ArmazemEmMemoria implements ArmazemDoDia {
   ({Map<String, dynamic> pacote, DateTime baixadoEm})? pacote;
   InicioPendente? inicio;
   final List<EventoNaFila> fila = [];
+  final List<FotoDaOs> anexos = [];
 
   @override
   Future<({Map<String, dynamic> pacote, DateTime baixadoEm})?> lerPacote() async => pacote;
@@ -268,14 +348,28 @@ class ArmazemEmMemoria implements ArmazemDoDia {
   Future<void> guardarInicioPendente(InicioPendente? inicio) async => this.inicio = inicio;
 
   @override
-  Future<void> registrarEvento(EventoDeCampo evento) async {
+  Future<void> registrarEvento(EventoDeCampo evento, {List<FotoDaOs> fotos = const []}) async {
     if (fila.any(
       (e) => e.evento.id == evento.id || (e.evento.osId == evento.osId && e.evento.sequencia == evento.sequencia),
     )) {
       throw StateError('Evento ou sequência repetida.');
     }
     fila.add(EventoNaFila(evento));
+    anexos.addAll(fotos);
   }
+
+  @override
+  Future<List<FotoDaOs>> fotos({bool soPendentes = false}) async =>
+      anexos.where((f) => !soPendentes || f.situacao == SituacaoDaFoto.pendente).toList();
+
+  @override
+  Future<void> atualizarFoto(FotoDaOs foto) async {
+    final i = anexos.indexWhere((f) => f.id == foto.id);
+    if (i >= 0) anexos[i] = foto;
+  }
+
+  @override
+  Future<void> esquecerFoto(String id) async => anexos.removeWhere((f) => f.id == id);
 
   @override
   Future<List<EventoNaFila>> eventos({bool soPendentes = false, int? limite}) async {
@@ -326,5 +420,6 @@ class ArmazemEmMemoria implements ArmazemDoDia {
     pacote = null;
     inicio = null;
     fila.clear();
+    anexos.clear();
   }
 }

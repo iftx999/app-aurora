@@ -1,6 +1,7 @@
 import 'package:aurora_campo/app/dependencias.dart';
 import 'package:aurora_campo/app/tema.dart';
 import 'package:aurora_campo/autenticacao/cofre.dart';
+import 'package:aurora_campo/dados/local/arquivos_de_foto.dart';
 import 'package:aurora_campo/dados/local/armazem_do_dia.dart';
 import 'package:aurora_campo/telas/inicio/inicio_tela.dart';
 import 'package:flutter/material.dart';
@@ -14,6 +15,7 @@ void main() {
     overrides: [
       apiCampoProvider.overrideWithValue(api),
       armazemProvider.overrideWithValue(armazem),
+      arquivosDeFotoProvider.overrideWithValue(ArquivosEmMemoria()),
       localizacaoProvider.overrideWithValue(GpsFalso()),
       relogioProvider.overrideWithValue(() => agoraDosTestes),
       cofreProvider.overrideWithValue(CofreEmMemoria()),
@@ -81,8 +83,10 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, 'Iniciar OS'));
     await tester.pumpAndSettle();
-    expect(find.text('Em execução.'), findsOneWidget);
-    Navigator.of(tester.element(find.text('Em execução.'))).pop();
+    expect(find.text('Em execução'), findsOneWidget);
+    expect(find.widgetWithText(FilledButton, 'Encerrar OS'), findsOneWidget);
+    expect(find.text('Início 09:00 · na fila'), findsOneWidget);
+    await tester.pageBack();
     await tester.pumpAndSettle();
 
     expect(find.text('Em execução · parada 2'), findsOneWidget);

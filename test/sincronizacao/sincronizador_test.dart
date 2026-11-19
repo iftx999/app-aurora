@@ -1,6 +1,8 @@
 import 'package:aurora_campo/dados/api/erros.dart';
+import 'package:aurora_campo/dados/local/arquivos_de_foto.dart';
 import 'package:aurora_campo/dados/local/armazem_do_dia.dart';
 import 'package:aurora_campo/dados/modelos/evento.dart';
+import 'package:aurora_campo/dados/modelos/foto.dart';
 import 'package:aurora_campo/sincronizacao/sincronizador.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -9,6 +11,7 @@ import '../apoio.dart';
 void main() {
   late ApiFalsa api;
   late ArmazemEmMemoria armazem;
+  late ArquivosEmMemoria arquivos;
   late Sincronizador sinc;
   late DateTime agora;
   var revogacoes = 0;
@@ -17,12 +20,21 @@ void main() {
   setUp(() {
     api = ApiFalsa();
     armazem = ArmazemEmMemoria();
+    arquivos = ArquivosEmMemoria();
     agora = agoraDosTestes;
     revogacoes = 0;
     recebimentos = 0;
-    sinc = Sincronizador(armazem: armazem, api: api, agora: () => agora, tamanhoDoLote: 2)
-      ..aoRevogar = (() async => revogacoes++)
-      ..aoReceber = (() => recebimentos++);
+    sinc =
+        Sincronizador(
+            armazem: armazem,
+            api: api,
+            arquivos: arquivos,
+            agora: () => agora,
+            tamanhoDoLote: 2,
+            parteDaFoto: 1000,
+          )
+          ..aoRevogar = (() async => revogacoes++)
+          ..aoReceber = (() => recebimentos++);
     // O relógio anda depois de criar: as respostas contam como "desta abertura".
     agora = agora.add(const Duration(seconds: 1));
   });
@@ -146,5 +158,91 @@ void main() {
     agora = agora.add(const Duration(days: 3));
     await sinc.enviar();
     expect(armazem.fila.map((e) => e.evento.id), ['b1']);
+  });
+
+  group('fotos', () {
+    Future<FotoDaOs> fotoNaFila() async {
+      final g = await arquivos.guardar('/cache/x.jpg', agora);
+      final foto = FotoDaOs(
+        id: g.id,
+        osId: 'a',
+        parametro: 'fachada',
+        caminho: g.caminho,
+        tipoMidia: g.tipoMidia,
+        tamanho: g.tamanho,
+        sha256: g.sha256,
+        tiradaEm: g.tiradaEm,
+      );
+      await sinc.registrar(eventoDeTeste('enc', acao: AcaoDeCampo.encerrar), fotos: [foto]);
+      return foto;
+    }
+
+    test('vão depois dos eventos, em partes, e saem do celular quando chegam', () async {
+      final foto = await fotoNaFila();
+      await sinc.enviar();
+      expect(api.lotes.single.single.id, 'enc');
+      expect(api.partes.map((x) => (x.inicio, x.tamanho)), [(0, 1000), (1000, 1000), (2000, 500)]);
+      expect(api.fotosRecebidas[foto.id], arquivos.conteudo.toList());
+      expect(arquivos.arquivos, isEmpty);
+      expect(armazem.anexos, isEmpty);
+      expect(sinc.estado.vazia, isTrue);
+    });
+
+    test('sem sinal no meio: retoma de onde o servidor parou, sem reenviar o que chegou', () async {
+      final foto = await fotoNaFila();
+      api.perderRespostaDaParte = 2; // a segunda parte chega, mas a resposta se perde
+      await sinc.enviar();
+      expect(sinc.estado.fotosPendentes, 1);
+      expect(armazem.anexos.single.recebido, 1000);
+
+      api.perderRespostaDaParte = null;
+      await sinc.enviar();
+      expect(api.partes.map((x) => x.inicio), [0, 1000, 2000]);
+      expect(api.fotosRecebidas[foto.id], arquivos.conteudo.toList());
+      expect(sinc.estado.fotosPendentes, 0);
+    });
+
+    test('recusada pelo servidor: avisa e apaga do celular', () async {
+      api.recusarFoto = true;
+      await fotoNaFila();
+      await sinc.enviar();
+      expect(sinc.estado.avisosDeFoto.single, contains('o conteúdo não é image/jpeg'));
+      expect(arquivos.arquivos, isEmpty);
+      expect(sinc.estado.fotosPendentes, 0);
+    });
+
+    test('foto de encerramento recusado não é enviada e sai do celular', () async {
+      api.responder = (e) =>
+          RespostaDoEvento(id: e.id, situacao: SituacaoDoEnvio.rejeitado, mensagem: 'Preencha "Diâmetro".');
+      final g = await arquivos.guardar('/cache/x.jpg', agora);
+      await sinc.registrar(
+        EventoDeCampo(
+          id: 'enc',
+          osId: 'a',
+          sequencia: 1,
+          acao: AcaoDeCampo.encerrar,
+          ocorridoEm: agora,
+          valores: {
+            'fachada': [g.id],
+          },
+        ),
+        fotos: [
+          FotoDaOs(
+            id: g.id,
+            osId: 'a',
+            parametro: 'fachada',
+            caminho: g.caminho,
+            tipoMidia: g.tipoMidia,
+            tamanho: g.tamanho,
+            sha256: g.sha256,
+            tiradaEm: g.tiradaEm,
+          ),
+        ],
+      );
+      await sinc.enviar();
+      expect(api.partes, isEmpty);
+      expect(arquivos.arquivos, isEmpty);
+      expect(sinc.estado.fotosPendentes, 0);
+    });
   });
 }

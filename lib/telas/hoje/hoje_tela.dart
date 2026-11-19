@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../app/dependencias.dart';
 import '../../app/tema.dart';
@@ -10,6 +9,8 @@ import '../../jornada/controle_do_dia.dart';
 import '../../nucleo/datas.dart';
 import '../../sincronizacao/controle_da_fila.dart';
 import '../comum/menu_da_conta.dart';
+import '../comum/navegar.dart';
+import '../ordem/ordem_tela.dart';
 
 /// "Hoje" (J8; protótipo `Main`): a OS atual com o botão Navegar e a lista do dia na ordem da rota.
 class HojeTela extends ConsumerWidget {
@@ -31,6 +32,13 @@ class HojeTela extends ConsumerWidget {
       controle.dispensarErro();
     });
     // Ação recusada, superada ou em conflito: o agente precisa saber (10.9.5).
+    ref.listen(filaProvider.select((f) => f.avisosDeFoto), (_, avisos) {
+      if (avisos.isEmpty) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(avisos.join(' ')), duration: const Duration(seconds: 8)));
+      ref.read(filaProvider.notifier).sincronizador.dispensarAvisos();
+    });
     ref.listen(filaProvider.select((f) => f.avisos), (_, avisos) {
       if (avisos.isEmpty) return;
       final primeiro = avisos.first;
@@ -171,11 +179,7 @@ class _Fila extends ConsumerWidget {
     final c = context.cores;
     final envio = fila.ultimoEnvio == null ? null : 'último envio ${hora(fila.ultimoEnvio!)}';
     final texto = [
-      switch (fila.pendentes) {
-        0 => 'Tudo enviado',
-        1 => '1 ação pendente',
-        final n => '$n ações pendentes',
-      },
+      _pendencias(fila.pendentes, fila.fotosPendentes),
       ?envio,
       ?fila.problema,
     ].join(' · ');
@@ -184,15 +188,15 @@ class _Fila extends ConsumerWidget {
       child: Row(
         children: [
           Icon(
-            fila.pendentes == 0 ? Icons.done_all_rounded : Icons.schedule_send_rounded,
+            fila.vazia ? Icons.done_all_rounded : Icons.schedule_send_rounded,
             size: 20,
-            color: fila.pendentes == 0 ? c.ok : c.atencao,
+            color: fila.vazia ? c.ok : c.atencao,
           ),
           const SizedBox(width: 8),
           Expanded(
             child: Text(texto, style: TextStyle(color: c.textoSecundario)),
           ),
-          if (fila.pendentes > 0)
+          if (!fila.vazia)
             TextButton(
               onPressed: fila.enviando ? null : () => ref.read(filaProvider.notifier).sincronizador.enviar(),
               child: Text(fila.enviando ? 'Enviando…' : 'Enviar agora'),
@@ -201,6 +205,16 @@ class _Fila extends ConsumerWidget {
       ),
     );
   }
+}
+
+/// "Tudo enviado", "1 ação pendente", "2 ações e 3 fotos pendentes".
+String _pendencias(int acoes, int fotos) {
+  if (acoes == 0 && fotos == 0) return 'Tudo enviado';
+  final partes = [
+    if (acoes > 0) acoes == 1 ? '1 ação' : '$acoes ações',
+    if (fotos > 0) fotos == 1 ? '1 foto' : '$fotos fotos',
+  ];
+  return '${partes.join(' e ')} ${acoes + fotos == 1 ? 'pendente' : 'pendentes'}';
 }
 
 class _CartaoAtual extends StatelessWidget {
@@ -242,7 +256,7 @@ class _CartaoAtual extends StatelessWidget {
             Row(
               children: [
                 Expanded(
-                  child: OutlinedButton(onPressed: () => mostrarOrdem(context, ordem), child: const Text('Ver OS')),
+                  child: OutlinedButton(onPressed: () => abrirOrdem(context, ordem), child: const Text('Ver OS')),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
@@ -285,7 +299,7 @@ class _LinhaDaOrdem extends StatelessWidget {
       label: 'Parada $posicao, ${ordem.servicoNome}, ${ordem.endereco}, $selo',
       excludeSemantics: true,
       child: InkWell(
-        onTap: () => mostrarOrdem(context, ordem),
+        onTap: () => abrirOrdem(context, ordem),
         borderRadius: BorderRadius.circular(12),
         child: ConstrainedBox(
           constraints: const BoxConstraints(minHeight: 64),
@@ -340,88 +354,4 @@ class _Selo extends StatelessWidget {
       style: TextStyle(color: cor, fontWeight: FontWeight.w700, fontSize: 13),
     ),
   );
-}
-
-/// Abre o app de navegação escolhido no celular (Waze, Google Maps) no destino da OS.
-Future<void> navegar(BuildContext context, OrdemDoDia ordem) async {
-  final lat = ordem.latitude, lon = ordem.longitude;
-  final destino = lat != null && lon != null
-      ? Uri.parse('geo:$lat,$lon?q=$lat,$lon')
-      : Uri(scheme: 'geo', path: '0,0', queryParameters: {'q': ordem.endereco});
-  final mensageiro = ScaffoldMessenger.of(context);
-  if (!await launchUrl(destino, mode: LaunchMode.externalApplication)) {
-    mensageiro.showSnackBar(const SnackBar(content: Text('Nenhum app de mapa instalado.')));
-  }
-}
-
-/// Resumo da OS. A execução (iniciar, paralisar, encerrar) entra no M6d.
-void mostrarOrdem(BuildContext context, OrdemDoDia ordem) {
-  final c = context.cores;
-  showModalBottomSheet<void>(
-    context: context,
-    showDragHandle: true,
-    isScrollControlled: true,
-    builder: (_) => SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('OS ${ordem.numero}', style: TextStyle(color: c.textoSecundario)),
-            Text(ordem.servicoNome, style: Theme.of(context).textTheme.titleLarge),
-            const SizedBox(height: 4),
-            Text(ordem.endereco),
-            if (ordem.matricula != null)
-              Text('Matrícula ${ordem.matricula}', style: TextStyle(color: c.textoSecundario)),
-            const SizedBox(height: 8),
-            Text('Prazo: ${diaCurto(ordem.prazo.toLocal())} às ${hora(ordem.prazo)}'),
-            Text('Previsto: ${ordem.quantidadePrevista} ${ordem.unidadeMedida}'),
-            if (ordem.instrucoes case final i? when i.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              Text('Instruções', style: Theme.of(context).textTheme.titleSmall),
-              Text(i),
-            ],
-            const SizedBox(height: 16),
-            _AcoesDaOrdem(ordem: ordem),
-            const SizedBox(height: 10),
-            OutlinedButton.icon(
-              onPressed: () => navegar(context, ordem),
-              icon: const Icon(Icons.navigation_rounded),
-              label: const Text('Navegar'),
-            ),
-          ],
-        ),
-      ),
-    ),
-  );
-}
-
-/// Iniciar e retomar já entram na fila; paralisar, devolver e encerrar (motivo, parâmetros e fotos) chegam no M6d.
-class _AcoesDaOrdem extends ConsumerWidget {
-  const _AcoesDaOrdem({required this.ordem});
-
-  final OrdemDoDia ordem;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    // A situação mais recente (a folha pode ter sido aberta antes de uma ação).
-    final atual =
-        ref.watch(controleDoDiaProvider.select((d) => d.pacote?.ordens.where((o) => o.id == ordem.id).firstOrNull)) ??
-        ordem;
-    final acao = [AcaoDeCampo.iniciar, AcaoDeCampo.retomar].where((a) => a.destino(atual.status) != null).firstOrNull;
-    if (acao == null) {
-      return Text(switch (atual.status) {
-        StatusOrdem.emExecucao => 'Em execução.',
-        StatusOrdem.encerrada => 'Encerrada.',
-        StatusOrdem.devolvida => 'Devolvida.',
-        _ => '',
-      });
-    }
-    return FilledButton.icon(
-      onPressed: () => ref.read(controleDoDiaProvider.notifier).registrar(ordem.id, acao),
-      icon: const Icon(Icons.play_arrow_rounded),
-      label: Text(acao == AcaoDeCampo.iniciar ? 'Iniciar OS' : 'Retomar OS'),
-    );
-  }
 }
