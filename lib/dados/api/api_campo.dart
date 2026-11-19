@@ -1,4 +1,5 @@
 import '../modelos/dia.dart';
+import '../modelos/evento.dart';
 import 'cliente_api.dart';
 
 /// Modelo, sistema e versão do app, enviados no cadastro do celular (J13).
@@ -65,4 +66,19 @@ class ApiCampo {
 
   Future<void> encerrarJornada(DateTime ocorridoEm) =>
       _cliente.postSemResposta('/api/v1/campo/jornada/fim', {'ocorridoEm': ocorridoEm.toUtc().toIso8601String()});
+
+  /// Lote de eventos da fila, em ordem (até 200; 10.9.4). [revogado]: o celular foi bloqueado e deve apagar os dados.
+  Future<({List<RespostaDoEvento> respostas, bool revogado})> enviarEventos(
+    List<EventoDeCampo> eventos,
+    DateTime enviadoEm,
+  ) async {
+    final r = await _cliente.post('/api/v1/campo/eventos', {
+      'enviadoEm': enviadoEm.toUtc().toIso8601String(),
+      'eventos': [for (final e in eventos) e.paraJson()],
+    });
+    return (
+      respostas: [for (final e in r['eventos'] as List) RespostaDoEvento.deJson(e as Map<String, dynamic>)],
+      revogado: r['revogado'] as bool? ?? false,
+    );
+  }
 }

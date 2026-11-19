@@ -69,6 +69,33 @@ void main() {
     expect(find.text('Com qual equipe você sai hoje?'), findsOneWidget);
   });
 
+  testWidgets('iniciar a OS sem sinal: a tela muda na hora e a fila mostra a pendência', (tester) async {
+    final api = ApiFalsa(equipes: equipesDeTeste)..respostasDoPacote.add(pacoteJson());
+    final armazem = ArmazemEmMemoria()..pacote = (pacote: pacoteJson(), baixadoEm: agoraDosTestes);
+    await tester.pumpWidget(app(api, armazem));
+    await tester.pumpAndSettle();
+    expect(find.text('Tudo enviado'), findsOneWidget);
+
+    api.semSinal = true;
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Ver OS'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Iniciar OS'));
+    await tester.pumpAndSettle();
+    expect(find.text('Em execução.'), findsOneWidget);
+    Navigator.of(tester.element(find.text('Em execução.'))).pop();
+    await tester.pumpAndSettle();
+
+    expect(find.text('Em execução · parada 2'), findsOneWidget);
+    expect(find.textContaining('1 ação pendente'), findsOneWidget);
+    expect(armazem.fila.single.evento.acao.name, 'iniciar');
+
+    api.semSinal = false;
+    await tester.tap(find.text('Enviar agora'));
+    await tester.pumpAndSettle();
+    expect(api.lotes, hasLength(1));
+    expect(find.textContaining('Tudo enviado · último envio'), findsOneWidget);
+  });
+
   for (final brilho in Brightness.values) {
     testWidgets('a lista do dia passa nas diretrizes de acessibilidade (${brilho.name})', (tester) async {
       final semantica = tester.ensureSemantics();

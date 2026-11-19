@@ -1,0 +1,234 @@
+import 'dart:async';
+
+import '../dados/api/api_campo.dart';
+import '../dados/api/erros.dart';
+import '../dados/local/armazem_do_dia.dart';
+import '../dados/modelos/evento.dart';
+
+/// Como está a fila (J10: "x ações pendentes · último envio hh:mm").
+class EstadoDaFila {
+  const EstadoDaFila({
+    this.pendentes = 0,
+    this.ultimoEnvio,
+    this.enviando = false,
+    this.falhasSeguidas = 0,
+    this.proximaTentativa,
+    this.problema,
+    this.avisos = const [],
+    this.versao = 0,
+    this.recebimentos = 0,
+  });
+
+  final int pendentes;
+
+  /// Último envio que o servidor respondeu.
+  final DateTime? ultimoEnvio;
+  final bool enviando;
+  final int falhasSeguidas;
+  final DateTime? proximaTentativa;
+
+  /// Por que o envio parou sem ser falta de sinal (sessão, servidor recusou o lote).
+  final String? problema;
+
+  /// Respostas que o agente precisa ver (recusado, superado, conflito), ainda não mostradas.
+  final List<EventoNaFila> avisos;
+
+  /// Muda a cada mudança da fila (para quem mostra a situação das OS por cima do pacote).
+  final int versao;
+
+  /// Quantos envios o servidor já recebeu nesta abertura (quem mostra o dia baixa as mudanças do pacote).
+  final int recebimentos;
+}
+
+/// Envia a fila em lotes, na ordem em que as ações foram feitas, com novas tentativas em intervalos crescentes
+/// (10.9.3). Uma chamada por vez; quem chama durante um envio espera o mesmo envio.
+class Sincronizador {
+  Sincronizador({
+    required this.armazem,
+    required this.api,
+    DateTime Function()? agora,
+    this.aoMudar,
+    this.aoRevogar,
+    this.aoReceber,
+    this.esperas = const [
+      Duration(seconds: 5),
+      Duration(seconds: 15),
+      Duration(seconds: 30),
+      Duration(minutes: 1),
+      Duration(minutes: 2),
+      Duration(minutes: 5),
+    ],
+    this.tamanhoDoLote = 200,
+  }) : _agora = agora ?? DateTime.now {
+    _desde = _agora();
+  }
+
+  final ArmazemDoDia armazem;
+  final ApiCampo api;
+  final DateTime Function() _agora;
+  final List<Duration> esperas;
+  final int tamanhoDoLote;
+
+  void Function(EstadoDaFila)? aoMudar;
+
+  /// O servidor disse que o celular foi bloqueado; chamado depois de enviar o que havia.
+  Future<void> Function()? aoRevogar;
+
+  /// Algum evento foi recebido pelo servidor (quem mostra o dia baixa as mudanças do pacote).
+  void Function()? aoReceber;
+
+  EstadoDaFila _estado = const EstadoDaFila();
+  EstadoDaFila get estado => _estado;
+
+  Future<void>? _emAndamento;
+  Timer? _agendado;
+  bool _parado = false;
+  bool _revogacaoTratada = false;
+  late final DateTime _desde;
+  final _avisados = <String>{};
+
+  void _mudar(EstadoDaFila novo) {
+    _estado = novo;
+    aoMudar?.call(novo);
+  }
+
+  EstadoDaFila _com({
+    int? pendentes,
+    DateTime? ultimoEnvio,
+    bool? enviando,
+    int? falhasSeguidas,
+    DateTime? Function()? proximaTentativa,
+    String? Function()? problema,
+    List<EventoNaFila>? avisos,
+    int? recebimentos,
+  }) => EstadoDaFila(
+    pendentes: pendentes ?? _estado.pendentes,
+    ultimoEnvio: ultimoEnvio ?? _estado.ultimoEnvio,
+    enviando: enviando ?? _estado.enviando,
+    falhasSeguidas: falhasSeguidas ?? _estado.falhasSeguidas,
+    proximaTentativa: proximaTentativa == null ? _estado.proximaTentativa : proximaTentativa(),
+    problema: problema == null ? _estado.problema : problema(),
+    avisos: avisos ?? _estado.avisos,
+    versao: _estado.versao + 1,
+    recebimentos: recebimentos ?? _estado.recebimentos,
+  );
+
+  /// Relê a contagem do banco (abertura do app, evento novo).
+  Future<void> recontar() async {
+    final pendentes = (await armazem.eventos(soPendentes: true)).length;
+    _mudar(_com(pendentes: pendentes));
+  }
+
+  /// Guarda o evento e tenta enviar logo (sem esperar o envio).
+  Future<void> registrar(EventoDeCampo evento) async {
+    await armazem.registrarEvento(evento);
+    await recontar();
+    unawaited(enviar());
+  }
+
+  /// "Enviar agora": cancela a espera e envia o que houver.
+  Future<void> enviar() {
+    if (_parado) return Future.value();
+    return _emAndamento ??= _enviar().whenComplete(() => _emAndamento = null);
+  }
+
+  /// O agente já viu esses avisos.
+  void dispensarAvisos() {
+    _avisados.addAll(_estado.avisos.map((e) => e.evento.id));
+    _mudar(_com(avisos: const []));
+  }
+
+  /// Revogação ou troca de empresa: envia o que der e para, sem avisar a revogação de novo.
+  Future<void> enviarEParar() async {
+    _revogacaoTratada = true;
+    if (!_parado) await enviar();
+    parar();
+  }
+
+  /// Para os envios automáticos (sessão encerrada).
+  void parar() {
+    _parado = true;
+    _agendado?.cancel();
+  }
+
+  Future<void> _enviar() async {
+    _agendado?.cancel();
+    _mudar(_com(enviando: true, proximaTentativa: () => null, problema: () => null));
+    var revogado = false;
+    var recebeu = false;
+    try {
+      while (!_parado) {
+        final lote = await armazem.eventos(soPendentes: true, limite: tamanhoDoLote);
+        if (lote.isEmpty) break;
+        final r = await _enviarLote(lote.map((e) => e.evento).toList());
+        if (r == null) break;
+        recebeu = true;
+        revogado = revogado || r;
+        _mudar(_com(ultimoEnvio: _agora(), falhasSeguidas: 0));
+      }
+    } on SemConexao {
+      final falhas = _estado.falhasSeguidas + 1;
+      final espera = esperas[(falhas - 1).clamp(0, esperas.length - 1)];
+      _mudar(_com(falhasSeguidas: falhas, proximaTentativa: () => _agora().add(espera)));
+      if (!_parado) _agendado = Timer(espera, () => unawaited(enviar()));
+    } on ErroDaApi catch (e) {
+      if (e.celularRevogado) {
+        revogado = true;
+      } else {
+        _mudar(_com(problema: () => e.mensagem));
+      }
+    } finally {
+      await _depoisDoEnvio();
+    }
+    if (recebeu) {
+      _mudar(_com(recebimentos: _estado.recebimentos + 1));
+      aoReceber?.call();
+    }
+    if (revogado && !_revogacaoTratada) {
+      _revogacaoTratada = true;
+      parar();
+      await aoRevogar?.call();
+    }
+  }
+
+  /// Envia um lote e marca as respostas; devolve se o celular foi revogado, ou nulo se não deu para continuar.
+  /// Lote que o servidor nem aceita ler (400) é reenviado um a um, para recusar só o evento com problema.
+  Future<bool?> _enviarLote(List<EventoDeCampo> lote) async {
+    try {
+      await armazem.contarTentativa(lote.map((e) => e.id));
+      final r = await api.enviarEventos(lote, _agora());
+      await armazem.marcarRespostas(r.respostas, _agora());
+      return r.revogado;
+    } on ErroDaApi catch (e) {
+      if (e.celularRevogado || (e.status != 400 && e.status != 422)) rethrow;
+      if (lote.length == 1) {
+        await armazem.marcarRecusado(lote.single.id, e.mensagem, _agora());
+        return false;
+      }
+      var revogado = false;
+      for (final evento in lote) {
+        revogado = (await _enviarLote([evento]) ?? false) || revogado;
+      }
+      return revogado;
+    }
+  }
+
+  Future<void> _depoisDoEnvio() async {
+    // Respondidos há mais de 2 dias saem do celular.
+    await armazem.esquecerRespondidos(_agora().subtract(const Duration(days: 2)));
+    final todos = await armazem.eventos();
+    // Só o que chegou nesta abertura do app; o histórico fica na tela da fila.
+    final avisos = todos
+        .where(
+          (e) => e.situacao.avisar && !_avisados.contains(e.evento.id) && !(e.respondidoEm?.isBefore(_desde) ?? true),
+        )
+        .toList();
+    _mudar(
+      _com(
+        enviando: false,
+        pendentes: todos.where((e) => e.situacao == SituacaoDoEnvio.pendente).length,
+        avisos: avisos,
+      ),
+    );
+  }
+}

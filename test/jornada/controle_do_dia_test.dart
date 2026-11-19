@@ -3,6 +3,8 @@ import 'package:aurora_campo/autenticacao/cofre.dart';
 import 'package:aurora_campo/dados/local/armazem_do_dia.dart';
 import 'package:aurora_campo/dados/localizacao.dart';
 import 'package:aurora_campo/dados/modelos/dia.dart';
+import 'package:aurora_campo/dados/modelos/evento.dart';
+import 'package:aurora_campo/sincronizacao/controle_da_fila.dart';
 import 'package:aurora_campo/jornada/controle_do_dia.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -172,6 +174,88 @@ void main() {
     await controle().encerrar();
     expect(api.encerramentos, 1);
     expect(estado().emJornada, isFalse);
-    expect(PacoteDoDia(armazem.pacote!.pacote).jornada?.aberta, isFalse);
+    // 10.9.6: o pacote sai do celular ao encerrar.
+    expect(armazem.pacote, isNull);
+  });
+
+  group('ações na fila (J9, J10)', () {
+    Future<void> emJornada({int ultimaSequencia = 0}) async {
+      armazem.pacote = (
+        pacote: pacoteJson(
+          ordens: [
+            ordemJson('a', sequencia: 1, ultimaSequencia: ultimaSequencia),
+            ordemJson('b', sequencia: 2),
+          ],
+        ),
+        baixadoEm: agoraDosTestes,
+      );
+      api.respostasDoPacote.add(pacoteJson(diferenca: true, ordens: const [], ids: const ['a', 'b']));
+      await abrir();
+      container().listen(filaProvider, (_, _) {});
+    }
+
+    StatusOrdem status(String id) => estado().pacote!.ordens.firstWhere((o) => o.id == id).status;
+
+    test('sem sinal: a ação vale na tela, fica na fila e continua a sequência do servidor', () async {
+      await emJornada(ultimaSequencia: 4);
+      api.semSinal = true;
+      await controle().registrar('a', AcaoDeCampo.iniciar);
+      expect(status('a'), StatusOrdem.emExecucao);
+      expect(estado().pacote!.atual?.id, 'a');
+      final e = armazem.fila.single;
+      expect(e.situacao, SituacaoDoEnvio.pendente);
+      expect(e.evento.sequencia, 5);
+      expect(e.evento.posicao?['latitude'], -22.5645);
+      expect(e.evento.versaoPacote, 100);
+      expect(container().read(filaProvider).pendentes, 1);
+
+      // A próxima ação da mesma OS segue a numeração do celular.
+      await controle().registrar('a', AcaoDeCampo.iniciar);
+      expect(estado().erro, contains('não é possível'));
+      expect(armazem.fila, hasLength(1));
+    });
+
+    test('com sinal: enviada na hora; recusada volta a OS para a situação do servidor', () async {
+      await emJornada();
+      api.responder = (e) =>
+          RespostaDoEvento(id: e.id, situacao: SituacaoDoEnvio.rejeitado, mensagem: 'Fora do prazo.');
+      await controle().registrar('a', AcaoDeCampo.iniciar);
+      await container().read(filaProvider.notifier).sincronizador.enviar();
+      await pumpEventQueue();
+      expect(api.lotes.single.single.osId, 'a');
+      expect(armazem.fila.single.situacao, SituacaoDoEnvio.rejeitado);
+      expect(status('a'), StatusOrdem.programada);
+      expect(container().read(filaProvider).avisos.single.mensagem, 'Fora do prazo.');
+    });
+
+    test('aplicada: continua valendo até o pacote novo mostrar a situação do servidor', () async {
+      await emJornada();
+      api.respostasDoPacote
+        ..clear()
+        ..add(
+          pacoteJson(
+            diferenca: true,
+            versao: 200,
+            ordens: [ordemJson('a', sequencia: 1, status: 'EM_EXECUCAO', ultimaSequencia: 1)],
+            ids: const ['a', 'b'],
+          ),
+        );
+      await controle().registrar('a', AcaoDeCampo.iniciar);
+      await container().read(filaProvider.notifier).sincronizador.enviar();
+      await pumpEventQueue();
+      expect(estado().pacote!.versao, 200);
+      expect(status('a'), StatusOrdem.emExecucao);
+      expect(estado().pacote!.ordens.firstWhere((o) => o.id == 'a').ultimaSequencia, 1);
+    });
+
+    test('encerrar a jornada com a fila sem sair é recusado', () async {
+      await emJornada();
+      api.semSinal = true;
+      await controle().registrar('b', AcaoDeCampo.devolver);
+      await controle().encerrar();
+      expect(estado().erro, contains('há 1 ação na fila'));
+      expect(api.encerramentos, 0);
+      expect(estado().emJornada, isTrue);
+    });
   });
 }

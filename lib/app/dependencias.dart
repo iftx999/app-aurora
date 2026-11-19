@@ -37,6 +37,9 @@ final sessaoProvider = NotifierProvider<ControleDaSessao, EstadoSessao>(Controle
 class ControleDaSessao extends Notifier<EstadoSessao> {
   late Sessao sessao;
 
+  /// Registrado pela fila quando ela existe (a fila observa a sessão; o contrário formaria um ciclo).
+  Future<void> Function()? enviarFila;
+
   @override
   EstadoSessao build() {
     sessao = Sessao(
@@ -47,7 +50,20 @@ class ControleDaSessao extends Notifier<EstadoSessao> {
       aoMudar: (novo) => state = novo,
     );
     sessao.cadastrarCelular = () => ref.read(apiCampoProvider).cadastrarCelular();
-    sessao.apagarDadosLocais = () => ref.read(armazemProvider).apagar();
+    // 10.9.6: a fila pendente vai antes de apagar, quando der; depois o servidor fica sabendo que o celular limpou.
+    sessao.apagarDadosLocais = () async {
+      try {
+        await enviarFila?.call();
+      } on Exception {
+        // Sem como enviar: apaga assim mesmo (o servidor registra o celular como revogado).
+      }
+      await ref.read(armazemProvider).apagar();
+      try {
+        await ref.read(apiCampoProvider).confirmarApagado();
+      } on Exception {
+        // Fica para o administrador ver como não confirmado.
+      }
+    };
     Future.microtask(sessao.iniciar);
     return const Carregando();
   }

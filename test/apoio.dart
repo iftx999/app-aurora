@@ -3,6 +3,7 @@ import 'package:aurora_campo/dados/api/cliente_api.dart';
 import 'package:aurora_campo/dados/api/erros.dart';
 import 'package:aurora_campo/dados/localizacao.dart';
 import 'package:aurora_campo/dados/modelos/dia.dart';
+import 'package:aurora_campo/dados/modelos/evento.dart';
 
 /// Quarta, 18/11/2026, 09:00 (hora local).
 final agoraDosTestes = DateTime(2026, 11, 18, 9);
@@ -19,6 +20,7 @@ Map<String, dynamic> ordemJson(
   String rua = 'R. XV de Novembro',
   String numero = '410',
   DateTime? atualizada,
+  int ultimaSequencia = 0,
 }) => {
   'ordem': {
     'id': id,
@@ -38,7 +40,11 @@ Map<String, dynamic> ordemJson(
     'sequenciaRota': sequencia,
   },
   'servicoVersaoId': 'v1',
+  'ultimaSequencia': ultimaSequencia,
 };
+
+EventoDeCampo eventoDeTeste(String id, {String os = 'a', int sequencia = 1, AcaoDeCampo acao = AcaoDeCampo.iniciar}) =>
+    EventoDeCampo(id: id, osId: os, sequencia: sequencia, acao: acao, ocorridoEm: agoraDosTestes);
 
 Map<String, dynamic> pacoteJson({
   String equipe = equipeRede,
@@ -108,6 +114,32 @@ class ApiFalsa extends ApiCampo {
 
   /// Resposta de `POST /jornada/inicio`.
   Map<String, dynamic> Function(String equipe) aoIniciar = (equipe) => pacoteJson(equipe: equipe);
+
+  /// Lotes recebidos em `POST /eventos`.
+  final lotes = <List<EventoDeCampo>>[];
+
+  /// Resposta por evento (padrão: aplicado). Lançar [ErroDaApi] recusa o lote inteiro.
+  RespostaDoEvento Function(EventoDeCampo) responder = (e) =>
+      RespostaDoEvento(id: e.id, situacao: SituacaoDoEnvio.aplicado);
+  bool revogarNoEnvio = false;
+  int confirmacoesDeApagado = 0;
+
+  @override
+  Future<({List<RespostaDoEvento> respostas, bool revogado})> enviarEventos(
+    List<EventoDeCampo> eventos,
+    DateTime enviadoEm,
+  ) async {
+    _rede();
+    final respostas = [for (final e in eventos) responder(e)];
+    lotes.add(eventos);
+    return (respostas: respostas, revogado: revogarNoEnvio);
+  }
+
+  @override
+  Future<void> confirmarApagado() async {
+    _rede();
+    confirmacoesDeApagado++;
+  }
 
   void _rede() {
     if (semSinal) throw const SemConexao('teste');

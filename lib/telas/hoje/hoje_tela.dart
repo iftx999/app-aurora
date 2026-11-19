@@ -5,8 +5,10 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../app/dependencias.dart';
 import '../../app/tema.dart';
 import '../../dados/modelos/dia.dart';
+import '../../dados/modelos/evento.dart';
 import '../../jornada/controle_do_dia.dart';
 import '../../nucleo/datas.dart';
+import '../../sincronizacao/controle_da_fila.dart';
 import '../comum/menu_da_conta.dart';
 
 /// "Hoje" (J8; protótipo `Main`): a OS atual com o botão Navegar e a lista do dia na ordem da rota.
@@ -27,6 +29,18 @@ class HojeTela extends ConsumerWidget {
         ..hideCurrentSnackBar()
         ..showSnackBar(SnackBar(content: Text(erro)));
       controle.dispensarErro();
+    });
+    // Ação recusada, superada ou em conflito: o agente precisa saber (10.9.5).
+    ref.listen(filaProvider.select((f) => f.avisos), (_, avisos) {
+      if (avisos.isEmpty) return;
+      final primeiro = avisos.first;
+      final texto =
+          '${primeiro.evento.acao.rotulo} da OS: ${primeiro.mensagem ?? _motivo(primeiro.situacao)}'
+          '${avisos.length > 1 ? ' (e mais ${avisos.length - 1})' : ''}';
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(texto), duration: const Duration(seconds: 8)));
+      ref.read(filaProvider.notifier).sincronizador.dispensarAvisos();
     });
 
     final atual = pacote?.atual;
@@ -56,6 +70,8 @@ class HojeTela extends ConsumerWidget {
           padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
           children: [
             _Situacao(dia: dia),
+            const SizedBox(height: 8),
+            const _Fila(),
             const SizedBox(height: 12),
             if (pacote == null || pacote.ordens.isEmpty)
               Padding(
@@ -77,6 +93,12 @@ class HojeTela extends ConsumerWidget {
     );
   }
 
+  static String _motivo(SituacaoDoEnvio s) => switch (s) {
+    SituacaoDoEnvio.superado => 'a programação mudou e a OS saiu da sua lista.',
+    SituacaoDoEnvio.conflito => 'registrada; a programação mudou e o programador vai decidir.',
+    _ => 'recusada pelo servidor.',
+  };
+
   static int _posicaoNaLista(PacoteDoDia p, OrdemDoDia o) => o.sequencia ?? (p.ordens.indexOf(o) + 1);
 
   Future<void> _encerrar(BuildContext context, WidgetRef ref) async {
@@ -84,7 +106,14 @@ class HojeTela extends ConsumerWidget {
       context: context,
       builder: (contexto) => AlertDialog(
         title: const Text('Encerrar a jornada?'),
-        content: const Text('O envio da sua localização para. Você só volta a receber OS ao iniciar outra jornada.'),
+        content: Text(
+          'O envio da sua localização para. Você só volta a receber OS ao iniciar outra jornada.'
+          '${switch (ref.read(filaProvider).pendentes) {
+            0 => '',
+            1 => '\n\nAntes, a ação que está na fila vai ser enviada.',
+            final n => '\n\nAntes, as $n ações que estão na fila vão ser enviadas.',
+          }}',
+        ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(contexto, false), child: const Text('Continuar trabalhando')),
           FilledButton(onPressed: () => Navigator.pop(contexto, true), child: const Text('Encerrar')),
@@ -126,6 +155,48 @@ class _Situacao extends StatelessWidget {
             ),
           ),
           if (dia.ocupado) const SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2)),
+        ],
+      ),
+    );
+  }
+}
+
+/// J10: "2 ações pendentes · último envio 14:32", sempre à vista, com "Enviar agora".
+class _Fila extends ConsumerWidget {
+  const _Fila();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final fila = ref.watch(filaProvider);
+    final c = context.cores;
+    final envio = fila.ultimoEnvio == null ? null : 'último envio ${hora(fila.ultimoEnvio!)}';
+    final texto = [
+      switch (fila.pendentes) {
+        0 => 'Tudo enviado',
+        1 => '1 ação pendente',
+        final n => '$n ações pendentes',
+      },
+      ?envio,
+      ?fila.problema,
+    ].join(' · ');
+    return Semantics(
+      liveRegion: true,
+      child: Row(
+        children: [
+          Icon(
+            fila.pendentes == 0 ? Icons.done_all_rounded : Icons.schedule_send_rounded,
+            size: 20,
+            color: fila.pendentes == 0 ? c.ok : c.atencao,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(texto, style: TextStyle(color: c.textoSecundario)),
+          ),
+          if (fila.pendentes > 0)
+            TextButton(
+              onPressed: fila.enviando ? null : () => ref.read(filaProvider.notifier).sincronizador.enviar(),
+              child: Text(fila.enviando ? 'Enviando…' : 'Enviar agora'),
+            ),
         ],
       ),
     );
@@ -312,7 +383,9 @@ void mostrarOrdem(BuildContext context, OrdemDoDia ordem) {
               Text(i),
             ],
             const SizedBox(height: 16),
-            FilledButton.icon(
+            _AcoesDaOrdem(ordem: ordem),
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
               onPressed: () => navegar(context, ordem),
               icon: const Icon(Icons.navigation_rounded),
               label: const Text('Navegar'),
@@ -322,4 +395,33 @@ void mostrarOrdem(BuildContext context, OrdemDoDia ordem) {
       ),
     ),
   );
+}
+
+/// Iniciar e retomar já entram na fila; paralisar, devolver e encerrar (motivo, parâmetros e fotos) chegam no M6d.
+class _AcoesDaOrdem extends ConsumerWidget {
+  const _AcoesDaOrdem({required this.ordem});
+
+  final OrdemDoDia ordem;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    // A situação mais recente (a folha pode ter sido aberta antes de uma ação).
+    final atual =
+        ref.watch(controleDoDiaProvider.select((d) => d.pacote?.ordens.where((o) => o.id == ordem.id).firstOrNull)) ??
+        ordem;
+    final acao = [AcaoDeCampo.iniciar, AcaoDeCampo.retomar].where((a) => a.destino(atual.status) != null).firstOrNull;
+    if (acao == null) {
+      return Text(switch (atual.status) {
+        StatusOrdem.emExecucao => 'Em execução.',
+        StatusOrdem.encerrada => 'Encerrada.',
+        StatusOrdem.devolvida => 'Devolvida.',
+        _ => '',
+      });
+    }
+    return FilledButton.icon(
+      onPressed: () => ref.read(controleDoDiaProvider.notifier).registrar(ordem.id, acao),
+      icon: const Icon(Icons.play_arrow_rounded),
+      label: Text(acao == AcaoDeCampo.iniciar ? 'Iniciar OS' : 'Retomar OS'),
+    );
+  }
 }

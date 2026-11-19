@@ -2,19 +2,24 @@
 /// armazenamento local e para aplicar as diferenças do pacote (10.9.2).
 library;
 
-enum StatusOrdem { planejada, programada, emExecucao, paralisada, devolvida, encerrada, cancelada }
+enum StatusOrdem {
+  planejada('PLANEJADA'),
+  programada('PROGRAMADA'),
+  emExecucao('EM_EXECUCAO'),
+  paralisada('PARALISADA'),
+  devolvida('DEVOLVIDA'),
+  encerrada('ENCERRADA'),
+  cancelada('CANCELADA');
+
+  const StatusOrdem(this.codigo);
+
+  final String codigo;
+}
 
 enum Prioridade { emergencial, alta, media, baixa }
 
-StatusOrdem _status(String s) => switch (s) {
-  'PLANEJADA' => StatusOrdem.planejada,
-  'PROGRAMADA' => StatusOrdem.programada,
-  'EM_EXECUCAO' => StatusOrdem.emExecucao,
-  'PARALISADA' => StatusOrdem.paralisada,
-  'DEVOLVIDA' => StatusOrdem.devolvida,
-  'ENCERRADA' => StatusOrdem.encerrada,
-  _ => StatusOrdem.cancelada,
-};
+StatusOrdem _status(String s) =>
+    StatusOrdem.values.firstWhere((v) => v.codigo == s, orElse: () => StatusOrdem.cancelada);
 
 Prioridade _prioridade(String s) => switch (s) {
   'EMERGENCIAL' => Prioridade.emergencial,
@@ -84,13 +89,23 @@ class Jornada {
 
 /// OS do pacote, com o que o app mostra e usa na execução.
 class OrdemDoDia {
-  const OrdemDoDia(this.json, {required this.servicoVersaoId});
+  const OrdemDoDia(this.json, {required this.servicoVersaoId, this.ultimaSequencia = 0});
 
-  factory OrdemDoDia.deJson(Map<String, dynamic> j) =>
-      OrdemDoDia(j['ordem'] as Map<String, dynamic>, servicoVersaoId: j['servicoVersaoId'] as String);
+  factory OrdemDoDia.deJson(Map<String, dynamic> j) => OrdemDoDia(
+    j['ordem'] as Map<String, dynamic>,
+    servicoVersaoId: j['servicoVersaoId'] as String,
+    ultimaSequencia: (j['ultimaSequencia'] as num?)?.toInt() ?? 0,
+  );
 
   final Map<String, dynamic> json;
   final String servicoVersaoId;
+
+  /// Último evento do campo que o servidor já processou nesta OS.
+  final int ultimaSequencia;
+
+  /// A mesma OS com a situação que o celular já registrou e o servidor ainda não mostrou.
+  OrdemDoDia comStatus(StatusOrdem novo) =>
+      OrdemDoDia({...json, 'status': novo.codigo}, servicoVersaoId: servicoVersaoId, ultimaSequencia: ultimaSequencia);
 
   String get id => json['id'] as String;
   int get numero => (json['numero'] as num).toInt();
@@ -160,6 +175,20 @@ class PacoteDoDia {
         ..sort(_naRota);
 
   factory PacoteDoDia.deJson(Map<String, dynamic> json) => PacoteDoDia(json);
+
+  PacoteDoDia._(this.json, this.ordens);
+
+  /// O pacote como a tela mostra: a situação do servidor com as ações do celular por cima, na ordem em que foram
+  /// feitas, enquanto o pacote não as reflete. [json] continua o do servidor.
+  PacoteDoDia comAcoes(Iterable<({String osId, StatusOrdem? Function(StatusOrdem) destino})> acoes) {
+    final porId = {for (final o in ordens) o.id: o};
+    for (final a in acoes) {
+      final o = porId[a.osId];
+      final novo = o == null ? null : a.destino(o.status);
+      if (o != null && novo != null) porId[a.osId] = o.comStatus(novo);
+    }
+    return PacoteDoDia._(json, [for (final o in ordens) porId[o.id]!]);
+  }
 
   final Map<String, dynamic> json;
 

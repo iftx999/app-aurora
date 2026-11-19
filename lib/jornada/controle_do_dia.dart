@@ -8,6 +8,8 @@ import '../dados/api/erros.dart';
 import '../dados/local/armazem_do_dia.dart';
 import '../dados/localizacao.dart';
 import '../dados/modelos/dia.dart';
+import '../dados/modelos/evento.dart';
+import '../sincronizacao/controle_da_fila.dart';
 
 /// O dia no celular: equipes, pacote baixado e jornada (J8; 10.9.2).
 class EstadoDoDia {
@@ -48,6 +50,7 @@ class EstadoDoDia {
     bool? carregado,
     List<EquipeDoDia>? equipes,
     PacoteDoDia? pacote,
+    bool semPacote = false,
     DateTime? baixadoEm,
     InicioPendente? Function()? inicioPendente,
     bool? ocupado,
@@ -57,8 +60,8 @@ class EstadoDoDia {
   }) => EstadoDoDia(
     carregado: carregado ?? this.carregado,
     equipes: equipes ?? this.equipes,
-    pacote: pacote ?? this.pacote,
-    baixadoEm: baixadoEm ?? this.baixadoEm,
+    pacote: semPacote ? null : (pacote ?? this.pacote),
+    baixadoEm: semPacote ? null : (baixadoEm ?? this.baixadoEm),
     inicioPendente: inicioPendente == null ? this.inicioPendente : inicioPendente(),
     ocupado: ocupado ?? this.ocupado,
     semSinal: semSinal ?? this.semSinal,
@@ -82,6 +85,9 @@ class ControleDoDia extends Notifier<EstadoDoDia> {
     if (ref.mounted) super.state = novo;
   }
 
+  /// O pacote como o servidor mandou; [EstadoDoDia.pacote] é ele com as ações do celular por cima.
+  PacoteDoDia? _doServidor;
+
   ArmazemDoDia get _armazem => ref.read(armazemProvider);
   DateTime _agora() => ref.read(relogioProvider)();
 
@@ -92,6 +98,9 @@ class ControleDoDia extends Notifier<EstadoDoDia> {
       final saiu = anterior is Desbloqueada || anterior is Bloqueada;
       if (saiu && (novo is SemLogin || novo is SemEmpresa || novo is Revogada)) ref.invalidateSelf();
     });
+    // Cada mudança da fila (ação nova, resposta do servidor) redesenha a situação das OS.
+    ref.listen(filaProvider.select((f) => f.versao), (_, _) => _mostrar());
+    ref.listen(filaProvider.select((f) => f.recebimentos), (_, _) => aoReceberDaFila());
     _carga = Future.microtask(_carregar);
     return const EstadoDoDia();
   }
@@ -104,12 +113,9 @@ class ControleDoDia extends Notifier<EstadoDoDia> {
   Future<void> _carregar() async {
     final guardado = await _armazem.lerPacote();
     final pendente = await _armazem.lerInicioPendente();
-    state = state.copiar(
-      carregado: true,
-      pacote: guardado == null ? null : PacoteDoDia(guardado.pacote),
-      baixadoEm: guardado?.baixadoEm,
-      inicioPendente: () => pendente,
-    );
+    _doServidor = guardado == null ? null : PacoteDoDia(guardado.pacote);
+    state = state.copiar(carregado: true, baixadoEm: guardado?.baixadoEm, inicioPendente: () => pendente);
+    await _mostrar();
     await atualizar();
   }
 
@@ -132,7 +138,7 @@ class ControleDoDia extends Notifier<EstadoDoDia> {
     }
     final equipes = await ref.read(apiCampoProvider).equipes();
     state = state.copiar(equipes: equipes);
-    final pacote = state.pacote;
+    final pacote = _doServidor;
     if (pacote != null && state.emJornada) {
       final resposta = await ref
           .read(apiCampoProvider)
@@ -184,11 +190,70 @@ class ControleDoDia extends Notifier<EstadoDoDia> {
     );
   }
 
-  /// J8: encerra a jornada; nenhuma OS pode estar em execução.
+  /// J9: registra a ação na fila **antes** de mudar a tela (10.9.3), com hora, GPS (se houver) e a sequência da OS;
+  /// o envio sai em seguida, ou quando o sinal voltar.
+  Future<void> registrar(
+    String osId,
+    AcaoDeCampo acao, {
+    String? motivoId,
+    String? observacao,
+    String? resultado,
+    num? quantidade,
+    Map<String, dynamic>? valores,
+  }) async {
+    final ordem = state.pacote?.ordens.where((o) => o.id == osId).firstOrNull;
+    if (ordem == null || acao.destino(ordem.status) == null) {
+      state = state.copiar(erro: () => '${acao.rotulo} não é possível nesta OS agora.');
+      return;
+    }
+    Posicao? posicao;
+    try {
+      posicao = await ref.read(localizacaoProvider).atual();
+    } on GpsIndisponivel {
+      // RN-22: sem GPS a ação vale; o servidor marca a falta da posição.
+    }
+    final sequencia = [ordem.ultimaSequencia, await _armazem.ultimaSequencia(osId)].reduce((a, b) => a > b ? a : b) + 1;
+    await ref
+        .read(filaProvider.notifier)
+        .sincronizador
+        .registrar(
+          EventoDeCampo(
+            id: const Uuid().v4(),
+            osId: osId,
+            sequencia: sequencia,
+            acao: acao,
+            ocorridoEm: _agora(),
+            motivoId: motivoId,
+            observacao: observacao,
+            resultado: resultado,
+            quantidade: quantidade,
+            valores: valores,
+            posicao: posicao?.paraJson().cast<String, dynamic>(),
+            versaoPacote: _doServidor?.versao,
+          ),
+        );
+    await _mostrar();
+  }
+
+  /// O servidor recebeu eventos: baixa as mudanças do pacote (situação oficial das OS, removidas).
+  Future<void> aoReceberDaFila() async {
+    if (state.emJornada && !state.ocupado) await atualizar();
+  }
+
+  /// J8: encerra a jornada; nenhuma OS pode estar em execução e a fila precisa ter saído.
   Future<void> encerrar() async {
     final pacote = state.pacote;
     if (pacote?.emExecucao != null) {
       state = state.copiar(erro: () => 'Paralise ou encerre a OS em execução antes de encerrar a jornada.');
+      return;
+    }
+    final fila = ref.read(filaProvider.notifier).sincronizador;
+    await fila.enviar();
+    if (fila.estado.pendentes > 0) {
+      final n = fila.estado.pendentes;
+      state = state.copiar(
+        erro: () => 'Ainda ${n == 1 ? 'há 1 ação' : 'há $n ações'} na fila. Encerre a jornada quando forem enviadas.',
+      );
       return;
     }
     if (state.inicioPendente != null) {
@@ -201,15 +266,10 @@ class ControleDoDia extends Notifier<EstadoDoDia> {
     }
     await _comApi(() async {
       await ref.read(apiCampoProvider).encerrarJornada(_agora());
-      final atual = state.pacote;
-      if (atual != null && atual.jornada != null) {
-        final json = {
-          ...atual.json,
-          'jornada': {...atual.json['jornada'] as Map<String, dynamic>, 'fim': _agora().toUtc().toIso8601String()},
-        };
-        await _armazem.guardarPacote(json, state.baixadoEm ?? _agora());
-        state = state.copiar(pacote: PacoteDoDia(json));
-      }
+      // 10.9.6: o pacote antigo sai do celular ao encerrar a jornada.
+      await _armazem.apagarPacote();
+      _doServidor = null;
+      state = state.copiar(semPacote: true);
       state = state.copiar(equipes: await ref.read(apiCampoProvider).equipes());
     }, semSinal: () async => state = state.copiar(erro: () => 'Sem sinal: encerre a jornada quando houver conexão.'));
   }
@@ -217,11 +277,35 @@ class ControleDoDia extends Notifier<EstadoDoDia> {
   void dispensarErro() => state = state.copiar(erro: () => null, abrirAjustes: false);
 
   Future<void> _guardar(Map<String, dynamic> resposta) async {
-    final atual = state.pacote;
+    final atual = _doServidor;
     final novo = atual == null || resposta['diferenca'] != true ? PacoteDoDia(resposta) : atual.aplicar(resposta);
     final agora = _agora();
     await _armazem.guardarPacote(novo.json, agora);
-    state = state.copiar(pacote: novo, baixadoEm: agora);
+    _doServidor = novo;
+    state = state.copiar(baixadoEm: agora);
+    await _mostrar();
+  }
+
+  /// Pacote do servidor + as ações que ele ainda não reflete: as da fila, as que esperam o anterior e as recebidas
+  /// depois do último download. Recusadas e superadas não valem.
+  Future<void> _mostrar() async {
+    final pacote = _doServidor;
+    if (pacote == null) {
+      state = state.copiar(semPacote: true, baixadoEm: state.baixadoEm);
+      return;
+    }
+    final baixado = state.baixadoEm;
+    final acoes = (await _armazem.eventos())
+        .where(
+          (e) =>
+              e.situacao.valeNoCelular &&
+              (e.situacao == SituacaoDoEnvio.pendente ||
+                  e.situacao == SituacaoDoEnvio.aguardando ||
+                  baixado == null ||
+                  (e.respondidoEm?.isAfter(baixado) ?? true)),
+        )
+        .map((e) => (osId: e.evento.osId, destino: e.evento.acao.destino));
+    state = state.copiar(pacote: pacote.comAcoes(acoes));
   }
 
   /// Roda a chamada marcando ocupado; falta de rede vira [semSinal] (ou o aviso), revogação apaga tudo.
