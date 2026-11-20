@@ -58,6 +58,8 @@ void main() {
       armazemProvider.overrideWithValue(ArmazemEmMemoria()),
       arquivosDeFotoProvider.overrideWithValue(ArquivosEmMemoria()),
       localizacaoProvider.overrideWithValue(GpsFalso()),
+      fonteDePosicoesProvider.overrideWithValue(PosicoesFalsas()),
+      aparelhoProvider.overrideWithValue(AparelhoFalso()),
       relogioProvider.overrideWithValue(() => agoraDosTestes),
     ],
     child: const AuroraApp(),

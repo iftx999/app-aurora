@@ -28,7 +28,10 @@ flutter build apk --debug
 - `lib/dados/modelos`: pacote do dia, OS, equipes e jornada (com a aplicação das diferenças do pacote).
 - `lib/dados/local`: banco SQLCipher do celular (chave no Keystore): último pacote e início de jornada sem sinal.
 - `lib/dados/localizacao.dart`: GPS pelo `geolocator_android` (o pacote geral traz dependências MPL do Linux).
-- `lib/jornada`: o dia no celular (iniciar com ou sem sinal, atualizar, encerrar).
+- `lib/jornada`: o dia no celular (iniciar com ou sem sinal, atualizar, encerrar) e a coleta de posições da jornada
+  (serviço em primeiro plano com notificação; 2 min ou 100 m).
+- `lib/sincronizacao`: fila de eventos, fotos e posições e o envio para a API.
+- `lib/dados/aparelho.dart`: bateria e permissão de notificação pelo canal nativo de `MainActivity.kt`.
 - `lib/app`: tema da Aurora, dependências (Riverpod) e rotas (go_router).
 - `lib/telas`: telas do protótipo (`docs/prototipo-app-campo` no back-end).
 

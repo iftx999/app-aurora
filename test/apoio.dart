@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:aurora_campo/dados/aparelho.dart';
 import 'package:aurora_campo/dados/api/api_campo.dart';
 import 'package:aurora_campo/dados/api/cliente_api.dart';
 import 'package:aurora_campo/dados/api/erros.dart';
@@ -157,6 +160,18 @@ class ApiFalsa extends ApiCampo {
     return (respostas: respostas, revogado: revogarNoEnvio);
   }
 
+  /// Lotes recebidos em `POST /posicoes`; [erroNasPosicoes] é lançado no lugar da resposta.
+  final lotesDePosicoes = <List<AmostraDePosicao>>[];
+  ErroDaApi? erroNasPosicoes;
+
+  @override
+  Future<int> enviarPosicoes(List<AmostraDePosicao> amostras) async {
+    _rede();
+    if (erroNasPosicoes case final e?) throw e;
+    lotesDePosicoes.add(amostras);
+    return amostras.length;
+  }
+
   @override
   Future<void> confirmarApagado() async {
     _rede();
@@ -282,4 +297,40 @@ class CameraFalsa implements Camera {
 
   @override
   Future<String?> tirar() async => '/cache/foto${++fotos}.jpg';
+}
+
+/// GPS contínuo controlado pelo teste: [ler] entrega uma leitura, [falhar] simula GPS desligado.
+class PosicoesFalsas implements FonteDePosicoes {
+  final assinaturas = <bool>[];
+  StreamController<AmostraDePosicao>? _atual;
+
+  bool get ativa => _atual != null && !_atual!.isClosed && _atual!.hasListener;
+
+  @override
+  Stream<AmostraDePosicao> acompanhar({required bool economia}) {
+    assinaturas.add(economia);
+    final c = StreamController<AmostraDePosicao>();
+    c.onCancel = c.close;
+    _atual = c;
+    return c.stream;
+  }
+
+  void ler(DateTime momento, double latitude, double longitude, {double precisaoM = 8}) =>
+      _atual?.add(AmostraDePosicao(momento, Posicao(latitude, longitude, precisaoM: precisaoM)));
+
+  void falhar(GpsIndisponivel erro) => _atual?.addError(erro);
+}
+
+class AparelhoFalso implements Aparelho {
+  ({int nivel, bool carregando})? carga = (nivel: 80, carregando: false);
+  int pedidosDeNotificacao = 0;
+
+  @override
+  Future<({int nivel, bool carregando})?> bateria() async => carga;
+
+  @override
+  Future<bool> pedirNotificacoes() async {
+    pedidosDeNotificacao++;
+    return true;
+  }
 }

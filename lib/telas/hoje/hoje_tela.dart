@@ -5,11 +5,13 @@ import '../../app/dependencias.dart';
 import '../../app/tema.dart';
 import '../../dados/modelos/dia.dart';
 import '../../dados/modelos/evento.dart';
+import '../../jornada/coleta_de_posicoes.dart';
 import '../../jornada/controle_do_dia.dart';
 import '../../nucleo/datas.dart';
 import '../../sincronizacao/controle_da_fila.dart';
 import '../comum/menu_da_conta.dart';
 import '../comum/navegar.dart';
+import '../fila/fila_tela.dart';
 import '../ordem/ordem_tela.dart';
 
 /// "Hoje" (J8; protótipo `Main`): a OS atual com o botão Navegar e a lista do dia na ordem da rota.
@@ -69,7 +71,9 @@ class HojeTela extends ConsumerWidget {
           ],
         ),
         actions: [
-          MenuDaConta(acoes: {'Encerrar jornada': () => _encerrar(context, ref)}),
+          MenuDaConta(
+            acoes: {'Fila de envio': () => abrirFila(context), 'Encerrar jornada': () => _encerrar(context, ref)},
+          ),
         ],
       ),
       body: RefreshIndicator(
@@ -80,6 +84,7 @@ class HojeTela extends ConsumerWidget {
             _Situacao(dia: dia),
             const SizedBox(height: 8),
             const _Fila(),
+            const _Coleta(),
             const SizedBox(height: 12),
             if (pacote == null || pacote.ordens.isEmpty)
               Padding(
@@ -178,30 +183,75 @@ class _Fila extends ConsumerWidget {
     final fila = ref.watch(filaProvider);
     final c = context.cores;
     final envio = fila.ultimoEnvio == null ? null : 'último envio ${hora(fila.ultimoEnvio!)}';
-    final texto = [
-      _pendencias(fila.pendentes, fila.fotosPendentes),
-      ?envio,
-      ?fila.problema,
-    ].join(' · ');
+    final texto = [_pendencias(fila.pendentes, fila.fotosPendentes), ?envio, ?fila.problema].join(' · ');
     return Semantics(
       liveRegion: true,
-      child: Row(
-        children: [
-          Icon(
-            fila.vazia ? Icons.done_all_rounded : Icons.schedule_send_rounded,
-            size: 20,
-            color: fila.vazia ? c.ok : c.atencao,
+      child: InkWell(
+        onTap: () => abrirFila(context),
+        borderRadius: BorderRadius.circular(8),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 48),
+          child: Row(
+            children: [
+              Icon(
+                fila.vazia ? Icons.done_all_rounded : Icons.schedule_send_rounded,
+                size: 20,
+                color: fila.vazia ? c.ok : c.atencao,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(texto, style: TextStyle(color: c.textoSecundario)),
+              ),
+              if (!fila.vazia)
+                TextButton(
+                  onPressed: fila.enviando ? null : () => ref.read(filaProvider.notifier).sincronizador.enviar(),
+                  child: Text(fila.enviando ? 'Enviando…' : 'Enviar agora'),
+                ),
+            ],
           ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(texto, style: TextStyle(color: c.textoSecundario)),
-          ),
-          if (!fila.vazia)
-            TextButton(
-              onPressed: fila.enviando ? null : () => ref.read(filaProvider.notifier).sincronizador.enviar(),
-              child: Text(fila.enviando ? 'Enviando…' : 'Enviar agora'),
+        ),
+      ),
+    );
+  }
+}
+
+/// RN-27: o agente vê que a localização está sendo registrada (e quando parou, por quê).
+class _Coleta extends ConsumerWidget {
+  const _Coleta();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final coleta = ref.watch(coletaProvider);
+    final c = context.cores;
+    if (!coleta.ativa && coleta.problema == null) return const SizedBox.shrink();
+    final parada = coleta.problema != null;
+    return Semantics(
+      liveRegion: true,
+      child: Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: Row(
+          children: [
+            Icon(
+              parada ? Icons.location_disabled_rounded : Icons.my_location_rounded,
+              size: 20,
+              color: parada ? c.perigo : c.ok,
             ),
-        ],
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                coleta.problema ??
+                    [
+                      'Localização registrada',
+                      if (coleta.economia) 'economia de bateria',
+                      if (coleta.ultima != null) 'última ${hora(coleta.ultima!)}',
+                    ].join(' · '),
+                style: TextStyle(color: parada ? c.perigo : c.textoSecundario),
+              ),
+            ),
+            if (coleta.abrirAjustes)
+              TextButton(onPressed: ref.read(coletaProvider.notifier).abrirAjustes, child: const Text('Ajustes')),
+          ],
+        ),
       ),
     );
   }

@@ -83,7 +83,10 @@ class ControleDoDia extends Notifier<EstadoDoDia> {
   @override
   set state(EstadoDoDia novo) {
     _ultimo = novo;
-    if (ref.mounted) super.state = novo;
+    if (ref.mounted) {
+      super.state = novo;
+      ref.read(posicoesLiberadasProvider.notifier).definir(novo.carregado && novo.inicioPendente == null);
+    }
   }
 
   /// O pacote como o servidor mandou; [EstadoDoDia.pacote] é ele com as ações do celular por cima.

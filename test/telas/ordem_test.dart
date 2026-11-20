@@ -61,6 +61,8 @@ void main() {
       arquivosDeFotoProvider.overrideWithValue(arquivos),
       cameraProvider.overrideWithValue(CameraFalsa()),
       localizacaoProvider.overrideWithValue(GpsFalso()),
+      fonteDePosicoesProvider.overrideWithValue(PosicoesFalsas()),
+      aparelhoProvider.overrideWithValue(AparelhoFalso()),
       relogioProvider.overrideWithValue(() => agoraDosTestes),
       cofreProvider.overrideWithValue(CofreEmMemoria()),
     ],

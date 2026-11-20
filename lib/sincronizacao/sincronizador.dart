@@ -21,6 +21,8 @@ class EstadoDaFila {
     this.recebimentos = 0,
     this.fotosPendentes = 0,
     this.avisosDeFoto = const [],
+    this.posicoesPendentes = 0,
+    this.ultimoEnvioDePosicoes,
   });
 
   final int pendentes;
@@ -48,7 +50,11 @@ class EstadoDaFila {
   /// Fotos que o servidor recusou (o texto vai para o agente).
   final List<String> avisosDeFoto;
 
-  /// Nada esperando envio.
+  /// Posições da jornada ainda no celular (RN-27); não contam como ações do agente.
+  final int posicoesPendentes;
+  final DateTime? ultimoEnvioDePosicoes;
+
+  /// Nenhuma ação nem foto esperando envio (as posições saem sozinhas e não prendem o fim da jornada).
   bool get vazia => pendentes == 0 && fotosPendentes == 0;
 }
 
@@ -73,6 +79,9 @@ class Sincronizador {
     ],
     this.tamanhoDoLote = 200,
     this.parteDaFoto = 1024 * 1024,
+    this.loteDePosicoes = 500,
+    this.posicoesParaEnviar = 5,
+    this.guardaDePosicoes = const Duration(days: 7),
   }) : _agora = agora ?? DateTime.now {
     _desde = _agora();
   }
@@ -86,6 +95,21 @@ class Sincronizador {
   final DateTime Function() _agora;
   final List<Duration> esperas;
   final int tamanhoDoLote;
+
+  /// Até 500 por envio (limite do servidor).
+  final int loteDePosicoes;
+
+  /// A partir de quantas posições na fila uma leitura nova dispara o envio (cerca de 10 min de jornada).
+  final int posicoesParaEnviar;
+
+  /// Posições mais velhas que isso saem do celular sem envio (o servidor só guarda as da jornada).
+  final Duration guardaDePosicoes;
+
+  /// Falso enquanto o início da jornada não chegou ao servidor: as posições esperam (senão iriam para a jornada
+  /// anterior e seriam descartadas).
+  bool Function() podeEnviarPosicoes = _sempre;
+
+  static bool _sempre() => true;
 
   void Function(EstadoDaFila)? aoMudar;
 
@@ -121,6 +145,8 @@ class Sincronizador {
     int? recebimentos,
     int? fotosPendentes,
     List<String>? avisosDeFoto,
+    int? posicoesPendentes,
+    DateTime? ultimoEnvioDePosicoes,
   }) => EstadoDaFila(
     pendentes: pendentes ?? _estado.pendentes,
     ultimoEnvio: ultimoEnvio ?? _estado.ultimoEnvio,
@@ -133,13 +159,15 @@ class Sincronizador {
     recebimentos: recebimentos ?? _estado.recebimentos,
     fotosPendentes: fotosPendentes ?? _estado.fotosPendentes,
     avisosDeFoto: avisosDeFoto ?? _estado.avisosDeFoto,
+    posicoesPendentes: posicoesPendentes ?? _estado.posicoesPendentes,
+    ultimoEnvioDePosicoes: ultimoEnvioDePosicoes ?? _estado.ultimoEnvioDePosicoes,
   );
 
   /// Relê a contagem do banco (abertura do app, evento novo).
   Future<void> recontar() async {
     final pendentes = (await armazem.eventos(soPendentes: true)).length;
     final fotos = (await armazem.fotos(soPendentes: true)).length;
-    _mudar(_com(pendentes: pendentes, fotosPendentes: fotos));
+    _mudar(_com(pendentes: pendentes, fotosPendentes: fotos, posicoesPendentes: await armazem.contarPosicoes()));
   }
 
   /// Guarda o evento (com as fotos que ele referencia) e tenta enviar logo (sem esperar o envio).
@@ -147,6 +175,15 @@ class Sincronizador {
     await armazem.registrarEvento(evento, fotos: fotos);
     await recontar();
     unawaited(enviar());
+  }
+
+  /// Guarda a leitura do GPS da jornada; com algumas acumuladas, envia (se não estiver esperando o sinal voltar).
+  Future<void> registrarPosicao(AmostraDePosicao amostra) async {
+    await armazem.guardarPosicao(amostra);
+    final n = await armazem.contarPosicoes();
+    _mudar(_com(posicoesPendentes: n));
+    final esperandoSinal = _agendado?.isActive ?? false;
+    if (n >= posicoesParaEnviar && !esperandoSinal && _emAndamento == null) unawaited(enviar());
   }
 
   /// "Enviar agora": cancela a espera e envia o que houver.
@@ -193,6 +230,8 @@ class Sincronizador {
       if (!_parado && !revogado && await _enviarFotos()) {
         _mudar(_com(ultimoEnvio: _agora(), falhasSeguidas: 0));
       }
+      // Posições por último: são as que menos importam se o sinal cair no meio.
+      if (!_parado && !revogado && podeEnviarPosicoes()) await _enviarPosicoes();
     } on SemConexao {
       final falhas = _estado.falhasSeguidas + 1;
       final espera = esperas[(falhas - 1).clamp(0, esperas.length - 1)];
@@ -293,6 +332,23 @@ class Sincronizador {
     return chegou;
   }
 
+  /// Envia as posições em lotes; qualquer resposta do servidor tira o lote do celular (gravadas ou fora da jornada).
+  Future<void> _enviarPosicoes() async {
+    while (!_parado) {
+      final lote = await armazem.posicoes(limite: loteDePosicoes);
+      if (lote.isEmpty) return;
+      try {
+        await api.enviarPosicoes([for (final p in lote) p.amostra]);
+      } on ErroDaApi catch (e) {
+        // 409: nenhuma jornada da equipe no servidor; 400/422: leitura que o servidor não aceita. Nos dois casos,
+        // reenviar não adianta. Outros erros (servidor fora) tentam de novo depois.
+        if (e.celularRevogado || !const {400, 409, 422}.contains(e.status)) rethrow;
+      }
+      await armazem.esquecerPosicoes(lote.last.ordem);
+      _mudar(_com(posicoesPendentes: await armazem.contarPosicoes(), ultimoEnvioDePosicoes: _agora()));
+    }
+  }
+
   static FotoDaOs _comServidor(FotoDaOs foto, AnexoNoServidor? servidor) => switch (servidor?.situacao) {
     null => foto.com(recebido: 0),
     'DISPONIVEL' => foto.com(situacao: SituacaoDaFoto.enviada, recebido: foto.tamanho),
@@ -303,6 +359,7 @@ class Sincronizador {
   Future<void> _depoisDoEnvio() async {
     // Respondidos há mais de 2 dias saem do celular.
     await armazem.esquecerRespondidos(_agora().subtract(const Duration(days: 2)));
+    await armazem.esquecerPosicoesAntigas(_agora().subtract(guardaDePosicoes));
     final todos = await armazem.eventos();
     // Só o que chegou nesta abertura do app; o histórico fica na tela da fila.
     final avisos = todos
@@ -315,6 +372,7 @@ class Sincronizador {
         enviando: false,
         pendentes: todos.where((e) => e.situacao == SituacaoDoEnvio.pendente).length,
         fotosPendentes: (await armazem.fotos(soPendentes: true)).length,
+        posicoesPendentes: await armazem.contarPosicoes(),
         avisos: avisos,
       ),
     );

@@ -17,6 +17,8 @@ void main() {
       armazemProvider.overrideWithValue(armazem),
       arquivosDeFotoProvider.overrideWithValue(ArquivosEmMemoria()),
       localizacaoProvider.overrideWithValue(GpsFalso()),
+      fonteDePosicoesProvider.overrideWithValue(PosicoesFalsas()),
+      aparelhoProvider.overrideWithValue(AparelhoFalso()),
       relogioProvider.overrideWithValue(() => agoraDosTestes),
       cofreProvider.overrideWithValue(CofreEmMemoria()),
     ],

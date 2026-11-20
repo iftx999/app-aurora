@@ -24,6 +24,16 @@ class Posicao {
   Map<String, Object?> paraJson() => {'latitude': latitude, 'longitude': longitude, 'precisaoM': precisaoM};
 }
 
+/// Posição da jornada com a hora da leitura (RN-27).
+class AmostraDePosicao {
+  const AmostraDePosicao(this.momento, this.posicao);
+
+  final DateTime momento;
+  final Posicao posicao;
+
+  Map<String, Object?> paraJson() => {'momento': momento.toUtc().toIso8601String(), ...posicao.paraJson()};
+}
+
 /// Endpoints de `/api/v1/campo` (ADR 0045).
 class ApiCampo {
   ApiCampo(this._cliente, this._info);
@@ -82,6 +92,15 @@ class ApiCampo {
       respostas: [for (final e in r['eventos'] as List) RespostaDoEvento.deJson(e as Map<String, dynamic>)],
       revogado: r['revogado'] as bool? ?? false,
     );
+  }
+
+  /// Posições da jornada em lote (até 500, em qualquer ordem); devolve quantas o servidor gravou.
+  /// 409: não há jornada aberta no servidor.
+  Future<int> enviarPosicoes(List<AmostraDePosicao> amostras) async {
+    final r = await _cliente.post('/api/v1/campo/posicoes', {
+      'posicoes': [for (final a in amostras) a.paraJson()],
+    });
+    return (r['gravadas'] as num?)?.toInt() ?? 0;
   }
 
   /// Quanto da foto o servidor já tem; nulo se nada chegou ainda.

@@ -9,6 +9,7 @@ import '../autenticacao/provedor_identidade.dart';
 import '../autenticacao/sessao.dart';
 import '../dados/api/api_campo.dart';
 import '../dados/api/cliente_api.dart';
+import '../dados/aparelho.dart';
 import '../dados/camera.dart';
 import '../dados/local/arquivos_de_foto.dart';
 import '../dados/local/armazem_do_dia.dart';
@@ -23,6 +24,8 @@ final armazemProvider = Provider<ArmazemDoDia>((ref) => ArmazemSqlCipher(ref.wat
 final arquivosDeFotoProvider = Provider<ArquivosDeFoto>((ref) => ArquivosNoAparelho());
 final cameraProvider = Provider<Camera>((ref) => CameraDoAparelho());
 final localizacaoProvider = Provider<Localizacao>((ref) => LocalizacaoDoAparelho());
+final fonteDePosicoesProvider = Provider<FonteDePosicoes>((ref) => PosicoesDoAparelho());
+final aparelhoProvider = Provider<Aparelho>((ref) => AparelhoAndroid());
 final relogioProvider = Provider<DateTime Function()>((ref) => DateTime.now);
 final biometriaProvider = Provider<Biometria>((ref) => BiometriaDoAparelho());
 final infoDoAparelhoProvider = Provider<Future<InfoDoAparelho> Function()>((ref) => () async {

@@ -5,6 +5,7 @@ import 'package:path/path.dart' as caminho;
 import 'package:sqflite_sqlcipher/sqflite.dart';
 
 import '../../autenticacao/cofre.dart';
+import '../api/api_campo.dart';
 import '../modelos/evento.dart';
 import '../modelos/foto.dart';
 
@@ -69,8 +70,29 @@ abstract interface class ArmazemDoDia {
   /// Tira da fila os já respondidos antes de [antesDe] (o histórico do dia fica para a tela da fila).
   Future<void> esquecerRespondidos(DateTime antesDe);
 
+  /// Posição da jornada no fim da fila de posições (RN-27).
+  Future<void> guardarPosicao(AmostraDePosicao amostra);
+
+  /// As mais antigas primeiro, com a [PosicaoNaFila.ordem] para tirar da fila depois do envio.
+  Future<List<PosicaoNaFila>> posicoes({int? limite});
+  Future<int> contarPosicoes();
+
+  /// Tira da fila as posições até [ordem] (inclusive): enviadas ou recusadas.
+  Future<void> esquecerPosicoes(int ordem);
+
+  /// Posições lidas antes de [antesDe] saem do celular mesmo sem envio (minimização, RIPD).
+  Future<void> esquecerPosicoesAntigas(DateTime antesDe);
+
   /// Celular revogado ou troca de empresa: apaga o banco inteiro.
   Future<void> apagar();
+}
+
+/// Posição guardada no celular esperando envio.
+class PosicaoNaFila {
+  const PosicaoNaFila(this.ordem, this.amostra);
+
+  final int ordem;
+  final AmostraDePosicao amostra;
 }
 
 /// Banco SQLite criptografado com SQLCipher; a chave (256 bits aleatórios) fica só no Keystore, pelo [Cofre].
@@ -98,15 +120,17 @@ class ArmazemSqlCipher implements ArmazemDoDia {
     return openDatabase(
       local,
       password: chave,
-      version: 3,
+      version: 4,
       onCreate: (db, _) async {
         await db.execute(_valor);
         await db.execute(_evento);
         await db.execute(_anexo);
+        await db.execute(_posicao);
       },
       onUpgrade: (db, de, _) async {
         if (de < 2) await db.execute(_evento);
         if (de < 3) await db.execute(_anexo);
+        if (de < 4) await db.execute(_posicao);
       },
     );
   }
@@ -128,6 +152,15 @@ class ArmazemSqlCipher implements ArmazemDoDia {
       situacao TEXT NOT NULL DEFAULT 'pendente',
       recebido INTEGER NOT NULL DEFAULT 0,
       recusa TEXT
+    )''';
+
+  static const _posicao = '''
+    CREATE TABLE posicao (
+      ordem INTEGER PRIMARY KEY AUTOINCREMENT,
+      momento TEXT NOT NULL,
+      latitude REAL NOT NULL,
+      longitude REAL NOT NULL,
+      precisao_m REAL
     )''';
 
   static const _evento = '''
@@ -315,6 +348,50 @@ class ArmazemSqlCipher implements ArmazemDoDia {
   }
 
   @override
+  Future<void> guardarPosicao(AmostraDePosicao amostra) async {
+    await (await _abrir()).insert('posicao', {
+      'momento': amostra.momento.toUtc().toIso8601String(),
+      'latitude': amostra.posicao.latitude,
+      'longitude': amostra.posicao.longitude,
+      'precisao_m': amostra.posicao.precisaoM,
+    });
+  }
+
+  @override
+  Future<List<PosicaoNaFila>> posicoes({int? limite}) async {
+    final linhas = await (await _abrir()).query('posicao', orderBy: 'ordem', limit: limite);
+    return [
+      for (final l in linhas)
+        PosicaoNaFila(
+          l['ordem'] as int,
+          AmostraDePosicao(
+            DateTime.parse(l['momento'] as String),
+            Posicao(
+              (l['latitude'] as num).toDouble(),
+              (l['longitude'] as num).toDouble(),
+              precisaoM: (l['precisao_m'] as num?)?.toDouble(),
+            ),
+          ),
+        ),
+    ];
+  }
+
+  @override
+  Future<int> contarPosicoes() async =>
+      ((await (await _abrir()).rawQuery('SELECT count(*) AS n FROM posicao')).first['n'] as int?) ?? 0;
+
+  @override
+  Future<void> esquecerPosicoes(int ordem) async {
+    await (await _abrir()).delete('posicao', where: 'ordem <= ?', whereArgs: [ordem]);
+  }
+
+  @override
+  Future<void> esquecerPosicoesAntigas(DateTime antesDe) async {
+    // ISO 8601 em UTC ordena como texto.
+    await (await _abrir()).delete('posicao', where: 'momento < ?', whereArgs: [antesDe.toUtc().toIso8601String()]);
+  }
+
+  @override
   Future<void> apagar() async {
     final aberto = _banco;
     _banco = null;
@@ -330,6 +407,8 @@ class ArmazemEmMemoria implements ArmazemDoDia {
   InicioPendente? inicio;
   final List<EventoNaFila> fila = [];
   final List<FotoDaOs> anexos = [];
+  final List<PosicaoNaFila> filaDePosicoes = [];
+  var _ordemDaPosicao = 0;
 
   @override
   Future<({Map<String, dynamic> pacote, DateTime baixadoEm})?> lerPacote() async => pacote;
@@ -416,10 +495,29 @@ class ArmazemEmMemoria implements ArmazemDoDia {
       fila.removeWhere((e) => e.situacao.recebido && (e.respondidoEm?.isBefore(antesDe) ?? false));
 
   @override
+  Future<void> guardarPosicao(AmostraDePosicao amostra) async =>
+      filaDePosicoes.add(PosicaoNaFila(++_ordemDaPosicao, amostra));
+
+  @override
+  Future<List<PosicaoNaFila>> posicoes({int? limite}) async =>
+      (limite == null ? filaDePosicoes : filaDePosicoes.take(limite)).toList();
+
+  @override
+  Future<int> contarPosicoes() async => filaDePosicoes.length;
+
+  @override
+  Future<void> esquecerPosicoes(int ordem) async => filaDePosicoes.removeWhere((p) => p.ordem <= ordem);
+
+  @override
+  Future<void> esquecerPosicoesAntigas(DateTime antesDe) async =>
+      filaDePosicoes.removeWhere((p) => p.amostra.momento.isBefore(antesDe));
+
+  @override
   Future<void> apagar() async {
     pacote = null;
     inicio = null;
     fila.clear();
     anexos.clear();
+    filaDePosicoes.clear();
   }
 }
