@@ -1,3 +1,13 @@
+/// Fundo do mapa (tiles raster) e a atribuição exigida pelo provedor.
+class FundoDoMapa {
+  const FundoDoMapa({required this.tiles, required this.atribuicao, this.zoomMaximo = 19});
+
+  /// Modelo com {z}/{x}/{y}.
+  final String tiles;
+  final String atribuicao;
+  final int zoomMaximo;
+}
+
 /// Endereços e parâmetros do app, definidos na compilação (`--dart-define`), nunca no código: cada ambiente da
 /// empresa gera o seu APK. Os padrões servem ao emulador Android falando com o ambiente local (10.0.2.2 = máquina
 /// hospedeira).
@@ -9,7 +19,15 @@ class Configuracao {
     this.redirecionamento = 'dev.aurora.campo:/oauthredirect',
     this.semRedeMaxima = const Duration(days: 7),
     this.permitirHttp = false,
+    this.mapa = osm,
   });
+
+  /// Tiles públicos do OpenStreetMap: só para desenvolvimento (a política de uso não admite tráfego de produção). A
+  /// empresa informa o provedor contratado ou o servidor de tiles próprio na compilação, como no front web (ADR 0017).
+  static const osm = FundoDoMapa(
+    tiles: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    atribuicao: '© OpenStreetMap',
+  );
 
   factory Configuracao.doAmbiente() {
     const api = String.fromEnvironment('AURORA_API', defaultValue: 'http://10.0.2.2:8080');
@@ -18,6 +36,13 @@ class Configuracao {
       api: Uri.parse(api),
       identidade: Uri.parse(identidade),
       permitirHttp: api.startsWith('http://') || identidade.startsWith('http://'),
+      mapa: const bool.hasEnvironment('AURORA_MAPA_TILES')
+          ? const FundoDoMapa(
+              tiles: String.fromEnvironment('AURORA_MAPA_TILES'),
+              atribuicao: String.fromEnvironment('AURORA_MAPA_ATRIBUICAO'),
+              zoomMaximo: int.fromEnvironment('AURORA_MAPA_ZOOM_MAXIMO', defaultValue: 19),
+            )
+          : osm,
     );
   }
 
@@ -38,5 +63,8 @@ class Configuracao {
   /// Só no ambiente local de desenvolvimento.
   final bool permitirHttp;
 
-  Uri emissor(String codigoEmpresa) => Uri.parse('${identidade.toString().replaceAll(RegExp(r'/$'), '')}/realms/$codigoEmpresa');
+  final FundoDoMapa mapa;
+
+  Uri emissor(String codigoEmpresa) =>
+      Uri.parse('${identidade.toString().replaceAll(RegExp(r'/$'), '')}/realms/$codigoEmpresa');
 }

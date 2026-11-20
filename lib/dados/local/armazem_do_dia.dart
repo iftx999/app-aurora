@@ -42,6 +42,10 @@ abstract interface class ArmazemDoDia {
 
   /// Fim da jornada: o pacote antigo sai do celular (10.9.6); a fila fica até ser enviada.
   Future<void> apagarPacote();
+
+  /// Última rota publicada baixada (para o mapa sem sinal) e o ETag dela; apagada com o pacote.
+  Future<({Map<String, dynamic> rota, String? etag})?> lerRota();
+  Future<void> guardarRota(Map<String, dynamic>? rota, {String? etag});
   Future<InicioPendente?> lerInicioPendente();
   Future<void> guardarInicioPendente(InicioPendente? inicio);
 
@@ -208,6 +212,16 @@ class ArmazemSqlCipher implements ArmazemDoDia {
 
   @override
   Future<void> apagarPacote() => _escrever('pacote', null);
+
+  @override
+  Future<({Map<String, dynamic> rota, String? etag})?> lerRota() async {
+    final v = await _ler('rota');
+    return v == null ? null : (rota: v['rota'] as Map<String, dynamic>, etag: v['etag'] as String?);
+  }
+
+  @override
+  Future<void> guardarRota(Map<String, dynamic>? rota, {String? etag}) =>
+      _escrever('rota', rota == null ? null : {'rota': rota, 'etag': etag});
 
   @override
   Future<InicioPendente?> lerInicioPendente() async {
@@ -405,6 +419,7 @@ class ArmazemSqlCipher implements ArmazemDoDia {
 class ArmazemEmMemoria implements ArmazemDoDia {
   ({Map<String, dynamic> pacote, DateTime baixadoEm})? pacote;
   InicioPendente? inicio;
+  ({Map<String, dynamic> rota, String? etag})? rota;
   final List<EventoNaFila> fila = [];
   final List<FotoDaOs> anexos = [];
   final List<PosicaoNaFila> filaDePosicoes = [];
@@ -419,6 +434,13 @@ class ArmazemEmMemoria implements ArmazemDoDia {
 
   @override
   Future<void> apagarPacote() async => pacote = null;
+
+  @override
+  Future<({Map<String, dynamic> rota, String? etag})?> lerRota() async => rota;
+
+  @override
+  Future<void> guardarRota(Map<String, dynamic>? rota, {String? etag}) async =>
+      this.rota = rota == null ? null : (rota: rota, etag: etag);
 
   @override
   Future<InicioPendente?> lerInicioPendente() async => inicio;
@@ -516,6 +538,7 @@ class ArmazemEmMemoria implements ArmazemDoDia {
   Future<void> apagar() async {
     pacote = null;
     inicio = null;
+    rota = null;
     fila.clear();
     anexos.clear();
     filaDePosicoes.clear();

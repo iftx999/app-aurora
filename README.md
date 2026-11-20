@@ -10,6 +10,8 @@ execução com fila local que funciona sem sinal, fotos e sincronização com `/
   `--dart-define=AURORA_API=https://api.empresa --dart-define=AURORA_IDENTIDADE=https://login.empresa`.
   Sem eles, o padrão é o ambiente local visto do emulador (`http://10.0.2.2:8080` e `:8180`), com HTTP liberado só no
   build de desenvolvimento.
+  Mapa: `--dart-define=AURORA_MAPA_TILES=https://tiles.empresa/{z}/{x}/{y}.png
+  --dart-define=AURORA_MAPA_ATRIBUICAO="© Provedor"` (sem eles, tiles públicos do OSM, só para desenvolvimento).
 - Keycloak: cliente público `aurora-campo` (PKCE, `dev.aurora.campo:/oauthredirect`, escopo `offline_access`) no
   realm de cada empresa.
 
@@ -32,6 +34,7 @@ flutter build apk --debug
   (serviço em primeiro plano com notificação; 2 min ou 100 m).
 - `lib/sincronizacao`: fila de eventos, fotos e posições e o envio para a API.
 - `lib/dados/aparelho.dart`: bateria e permissão de notificação pelo canal nativo de `MainActivity.kt`.
+- `lib/telas/mapa`: mapa da rota (`flutter_map`) com o traçado de `GET /campo/rota`.
 - `lib/app`: tema da Aurora, dependências (Riverpod) e rotas (go_router).
 - `lib/telas`: telas do protótipo (`docs/prototipo-app-campo` no back-end).
 

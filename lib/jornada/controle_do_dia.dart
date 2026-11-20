@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 
@@ -10,6 +12,7 @@ import '../dados/localizacao.dart';
 import '../dados/modelos/dia.dart';
 import '../dados/modelos/evento.dart';
 import '../dados/modelos/foto.dart';
+import '../dados/modelos/rota.dart';
 import '../sincronizacao/controle_da_fila.dart';
 
 /// O dia no celular: equipes, pacote baixado e jornada (J8; 10.9.2).
@@ -24,6 +27,7 @@ class EstadoDoDia {
     this.semSinal = false,
     this.erro,
     this.abrirAjustes = false,
+    this.rota,
   });
 
   /// Já leu o que estava guardado no celular.
@@ -45,6 +49,9 @@ class EstadoDoDia {
   /// O erro só se resolve nos ajustes do Android (permissão negada de vez).
   final bool abrirAjustes;
 
+  /// Rota publicada da equipe (mapa); nula até haver uma.
+  final RotaDoDia? rota;
+
   bool get emJornada => inicioPendente != null || (pacote?.jornada?.aberta ?? false);
 
   EstadoDoDia copiar({
@@ -58,6 +65,7 @@ class EstadoDoDia {
     bool? semSinal,
     String? Function()? erro,
     bool? abrirAjustes,
+    RotaDoDia? Function()? rota,
   }) => EstadoDoDia(
     carregado: carregado ?? this.carregado,
     equipes: equipes ?? this.equipes,
@@ -68,6 +76,7 @@ class EstadoDoDia {
     semSinal: semSinal ?? this.semSinal,
     erro: erro == null ? this.erro : erro(),
     abrirAjustes: abrirAjustes ?? this.abrirAjustes,
+    rota: semPacote ? null : (rota == null ? this.rota : rota()),
   );
 }
 
@@ -105,11 +114,21 @@ class ControleDoDia extends Notifier<EstadoDoDia> {
     // Cada mudança da fila (ação nova, resposta do servidor) redesenha a situação das OS.
     ref.listen(filaProvider.select((f) => f.versao), (_, _) => _mostrar());
     ref.listen(filaProvider.select((f) => f.recebimentos), (_, _) => aoReceberDaFila());
+    ref.onDispose(() {
+      for (final t in _consultasDaRota) {
+        t.cancel();
+      }
+    });
     _carga = Future.microtask(_carregar);
     return const EstadoDoDia();
   }
 
   Future<void>? _carga;
+
+  /// A rota da jornada é calculada no servidor depois do início (ADR 0048): o app pergunta de novo algumas vezes.
+  static const consultasDaRota = [Duration(seconds: 15), Duration(seconds: 45)];
+  final _consultasDaRota = <Timer>[];
+  String? _etagDaRota;
 
   /// Lê o que está no celular e tenta atualizar pela API (uma vez por sessão; depois, [atualizar]).
   Future<void> carregar() => _carga ??= _carregar();
@@ -117,8 +136,15 @@ class ControleDoDia extends Notifier<EstadoDoDia> {
   Future<void> _carregar() async {
     final guardado = await _armazem.lerPacote();
     final pendente = await _armazem.lerInicioPendente();
+    final rota = await _armazem.lerRota();
     _doServidor = guardado == null ? null : PacoteDoDia(guardado.pacote);
-    state = state.copiar(carregado: true, baixadoEm: guardado?.baixadoEm, inicioPendente: () => pendente);
+    _etagDaRota = rota?.etag;
+    state = state.copiar(
+      carregado: true,
+      baixadoEm: guardado?.baixadoEm,
+      inicioPendente: () => pendente,
+      rota: () => rota == null ? null : RotaDoDia(rota.rota),
+    );
     await _mostrar();
     await atualizar();
   }
@@ -139,6 +165,7 @@ class ControleDoDia extends Notifier<EstadoDoDia> {
       );
       await _armazem.guardarInicioPendente(null);
       state = state.copiar(inicioPendente: () => null);
+      _consultarRotaEmSeguida();
     }
     final equipes = await ref.read(apiCampoProvider).equipes();
     state = state.copiar(equipes: equipes);
@@ -149,7 +176,31 @@ class ControleDoDia extends Notifier<EstadoDoDia> {
           .pacote(desde: _deHoje(pacote) ? pacote.versao : null, equipe: pacote.equipeId);
       await _guardar(resposta);
     }
+    if (state.emJornada) await _atualizarRota();
   });
+
+  /// Baixa a rota só quando mudou (ETag). Sem jornada no servidor (409), fica a que estava.
+  Future<void> _atualizarRota() async {
+    try {
+      final r = await ref.read(apiCampoProvider).rota(conhecida: _etagDaRota);
+      if (!r.mudou) return;
+      await _armazem.guardarRota(r.json, etag: r.etag);
+      _etagDaRota = r.etag;
+      state = state.copiar(rota: () => r.json == null ? null : RotaDoDia(r.json!));
+    } on ErroDaApi catch (e) {
+      if (e.celularRevogado) rethrow;
+    }
+  }
+
+  void _consultarRotaEmSeguida() {
+    for (final espera in consultasDaRota) {
+      _consultasDaRota.add(
+        Timer(espera, () {
+          if (ref.mounted && state.emJornada && state.rota?.origem != 'JORNADA') unawaited(atualizar());
+        }),
+      );
+    }
+  }
 
   /// J8: lê o GPS e abre a jornada. Sem sinal, segue com a programação já baixada da equipe e envia o início depois.
   Future<void> iniciar(String equipeId) async {
@@ -177,6 +228,9 @@ class ControleDoDia extends Notifier<EstadoDoDia> {
               .iniciarJornada(id: inicio.id, equipeId: equipeId, ocorridoEm: inicio.ocorridoEm, posicao: posicao),
         );
         state = state.copiar(equipes: await ref.read(apiCampoProvider).equipes());
+        // A do programador já aparece; a calculada da posição chega nas consultas seguintes.
+        await _atualizarRota();
+        _consultarRotaEmSeguida();
       },
       semSinal: () async {
         final pacote = state.pacote;
@@ -274,6 +328,8 @@ class ControleDoDia extends Notifier<EstadoDoDia> {
       await ref.read(apiCampoProvider).encerrarJornada(_agora());
       // 10.9.6: o pacote antigo sai do celular ao encerrar a jornada.
       await _armazem.apagarPacote();
+      await _armazem.guardarRota(null);
+      _etagDaRota = null;
       _doServidor = null;
       state = state.copiar(semPacote: true);
       state = state.copiar(equipes: await ref.read(apiCampoProvider).equipes());

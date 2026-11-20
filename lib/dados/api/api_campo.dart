@@ -103,6 +103,17 @@ class ApiCampo {
     return (r['gravadas'] as num?)?.toInt() ?? 0;
   }
 
+  /// Rota publicada da equipe em jornada (ADR 0048). [conhecida]: ETag da rota que o celular já tem.
+  /// Devolve `mudou: false` quando é a mesma (304); `json` nulo quando não há rota publicada (204).
+  Future<({bool mudou, Map<String, dynamic>? json, String? etag})> rota({String? conhecida}) async {
+    final r = await _cliente.getCondicional('/api/v1/campo/rota', etag: conhecida);
+    return switch (r.status) {
+      304 => (mudou: false, json: null, etag: conhecida),
+      200 => (mudou: true, json: r.json, etag: r.etag),
+      _ => (mudou: true, json: null, etag: null),
+    };
+  }
+
   /// Quanto da foto o servidor já tem; nulo se nada chegou ainda.
   Future<AnexoNoServidor?> estadoDaFoto(String id) async {
     try {

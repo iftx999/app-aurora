@@ -29,6 +29,16 @@ class ClienteApi {
   Future<Map<String, dynamic>> get(String caminho, {Map<String, String>? parametros}) async =>
       _json(await _enviar('GET', caminho, parametros: parametros));
 
+  /// GET com ETag: [etag] vai em `If-None-Match`; 304 volta com [json] vazio e o mesmo ETag.
+  Future<({int status, Map<String, dynamic> json, String? etag})> getCondicional(String caminho, {String? etag}) async {
+    final r = await _enviar('GET', caminho, cabecalhos: {'If-None-Match': ?etag});
+    return (
+      status: r.statusCode,
+      json: r.statusCode == 200 ? _json(r) : const <String, dynamic>{},
+      etag: r.headers['etag'],
+    );
+  }
+
   Future<List<dynamic>> getLista(String caminho) async {
     final r = await _enviar('GET', caminho);
     return r.body.isEmpty ? const [] : jsonDecode(utf8.decode(r.bodyBytes)) as List<dynamic>;

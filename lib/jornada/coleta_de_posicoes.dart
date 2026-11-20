@@ -60,6 +60,7 @@ class EstadoDaColeta {
   const EstadoDaColeta({
     this.ativa = false,
     this.ultima,
+    this.posicao,
     this.economia = false,
     this.problema,
     this.abrirAjustes = false,
@@ -69,6 +70,9 @@ class EstadoDaColeta {
 
   /// Última posição guardada.
   final DateTime? ultima;
+
+  /// Onde o agente estava na última leitura aceita (marcador "você" no mapa).
+  final Posicao? posicao;
   final bool economia;
 
   /// GPS desligado ou permissão retirada durante a jornada.
@@ -124,7 +128,7 @@ class ControleDaColeta extends Notifier<EstadoDaColeta> {
     await _assinatura?.cancel();
     if (!_ligada) return;
     _amostrador.recomecar();
-    _publicar(EstadoDaColeta(ativa: true, ultima: state.ultima, economia: economia));
+    _publicar(EstadoDaColeta(ativa: true, ultima: state.ultima, posicao: state.posicao, economia: economia));
     _assinatura = ref
         .read(fonteDePosicoesProvider)
         .acompanhar(economia: economia)
@@ -137,6 +141,7 @@ class ControleDaColeta extends Notifier<EstadoDaColeta> {
             _publicar(
               EstadoDaColeta(
                 ultima: state.ultima,
+                posicao: state.posicao,
                 economia: economia,
                 problema: gps?.mensagem ?? 'O GPS parou de responder.',
                 abrirAjustes: gps?.abrirAjustes ?? false,
@@ -150,7 +155,7 @@ class ControleDaColeta extends Notifier<EstadoDaColeta> {
   Future<void> _aoLer(AmostraDePosicao leitura) async {
     if (!_ligada || !_amostrador.aceita(leitura, economia: state.economia)) return;
     await ref.read(filaProvider.notifier).sincronizador.registrarPosicao(leitura);
-    _publicar(EstadoDaColeta(ativa: true, ultima: leitura.momento, economia: state.economia));
+    _publicar(EstadoDaColeta(ativa: true, ultima: leitura.momento, posicao: leitura.posicao, economia: state.economia));
   }
 
   Future<void> _conferirBateria() async {

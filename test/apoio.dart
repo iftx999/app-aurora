@@ -160,6 +160,22 @@ class ApiFalsa extends ApiCampo {
     return (respostas: respostas, revogado: revogarNoEnvio);
   }
 
+  /// Rota publicada (`GET /campo/rota`); nula = 204. [pedidosDeRota] guarda o ETag de cada pedido.
+  Map<String, dynamic>? rotaPublicada;
+  final pedidosDeRota = <String?>[];
+  ErroDaApi? erroNaRota;
+
+  @override
+  Future<({bool mudou, Map<String, dynamic>? json, String? etag})> rota({String? conhecida}) async {
+    _rede();
+    pedidosDeRota.add(conhecida);
+    if (erroNaRota case final e?) throw e;
+    final r = rotaPublicada;
+    final etag = r == null ? null : '"${r['roteirizacaoId']}"';
+    if (etag != null && etag == conhecida) return (mudou: false, json: null, etag: conhecida);
+    return (mudou: true, json: r, etag: etag);
+  }
+
   /// Lotes recebidos em `POST /posicoes`; [erroNasPosicoes] é lançado no lugar da resposta.
   final lotesDePosicoes = <List<AmostraDePosicao>>[];
   ErroDaApi? erroNasPosicoes;
@@ -334,3 +350,38 @@ class AparelhoFalso implements Aparelho {
     return true;
   }
 }
+
+/// Rota como o servidor devolve: três paradas a/b/c a leste da partida, pela malha.
+Map<String, dynamic> rotaJson({String id = 'r1', String origem = 'JORNADA', bool pelaMalha = true}) => {
+  'roteirizacaoId': id,
+  'origem': origem,
+  'calculo': pelaMalha ? 'VALHALLA' : 'LINHA_RETA',
+  'publicadaEm': agoraDosTestes.toUtc().toIso8601String(),
+  'inicio': agoraDosTestes.toUtc().toIso8601String(),
+  'fimPrevisto': DateTime.utc(2026, 11, 18, 18, 40).toIso8601String(),
+  'km': 12.4,
+  'minutosDeslocamento': 38,
+  'minutosServico': 120,
+  'partidaLatitude': -22.5645,
+  'partidaLongitude': -47.4017,
+  'tracado': pelaMalha
+      ? [
+          [
+            [-47.4017, -22.5645],
+            [-47.4000, -22.5640],
+            [-47.40, -22.56],
+          ],
+        ]
+      : const [],
+  'paradas': [
+    for (final (i, os) in ['b', 'a', 'c'].indexed)
+      {
+        'ordemServicoId': os,
+        'ordem': i + 1,
+        'chegadaPrevista': agoraDosTestes.add(Duration(minutes: 30 * (i + 1))).toUtc().toIso8601String(),
+        'saidaPrevista': agoraDosTestes.add(Duration(minutes: 30 * (i + 1) + 20)).toUtc().toIso8601String(),
+        'latitude': -22.56,
+        'longitude': -47.40 + i * 0.001,
+      },
+  ],
+};

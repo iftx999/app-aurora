@@ -12,6 +12,7 @@ import '../../sincronizacao/controle_da_fila.dart';
 import '../comum/menu_da_conta.dart';
 import '../comum/navegar.dart';
 import '../fila/fila_tela.dart';
+import '../mapa/mapa_tela.dart';
 import '../ordem/ordem_tela.dart';
 
 /// "Hoje" (J8; protótipo `Main`): a OS atual com o botão Navegar e a lista do dia na ordem da rota.
@@ -71,6 +72,7 @@ class HojeTela extends ConsumerWidget {
           ],
         ),
         actions: [
+          IconButton(onPressed: () => abrirMapa(context), tooltip: 'Mapa da rota', icon: const Icon(Icons.map_rounded)),
           MenuDaConta(
             acoes: {'Fila de envio': () => abrirFila(context), 'Encerrar jornada': () => _encerrar(context, ref)},
           ),
