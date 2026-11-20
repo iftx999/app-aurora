@@ -20,6 +20,7 @@ class Configuracao {
     this.semRedeMaxima = const Duration(days: 7),
     this.permitirHttp = false,
     this.mapa = osm,
+    this.empresaGerenciada,
   });
 
   /// Tiles públicos do OpenStreetMap: só para desenvolvimento (a política de uso não admite tráfego de produção). A
@@ -29,14 +30,36 @@ class Configuracao {
     atribuicao: '© OpenStreetMap',
   );
 
-  factory Configuracao.doAmbiente() {
-    const api = String.fromEnvironment('AURORA_API', defaultValue: 'http://10.0.2.2:8080');
-    const identidade = String.fromEnvironment('AURORA_IDENTIDADE', defaultValue: 'http://10.0.2.2:8180');
+  /// Valores da compilação (`--dart-define`), substituídos pelos da configuração gerenciada do Android Enterprise
+  /// ([gerenciada], chaves de `res/xml/app_restrictions.xml`) quando o MDM os define: um só APK para todas as empresas.
+  /// Endereço gerenciado só vale com HTTPS (HTTP só no build de desenvolvimento).
+  factory Configuracao.doAmbiente({Map<String, Object?> gerenciada = const {}}) {
+    const apiCompilada = String.fromEnvironment('AURORA_API', defaultValue: 'http://10.0.2.2:8080');
+    const identidadeCompilada = String.fromEnvironment('AURORA_IDENTIDADE', defaultValue: 'http://10.0.2.2:8180');
+    final httpNaCompilacao = apiCompilada.startsWith('http://') || identidadeCompilada.startsWith('http://');
+    String? endereco(String chave) {
+      final v = (gerenciada[chave] as String?)?.trim() ?? '';
+      final uri = Uri.tryParse(v);
+      final valido =
+          uri != null && uri.hasAuthority && (uri.scheme == 'https' || (httpNaCompilacao && uri.scheme == 'http'));
+      return valido ? v : null;
+    }
+
+    final api = endereco('api_url') ?? apiCompilada;
+    final identidade = endereco('identidade_url') ?? identidadeCompilada;
+    final codigo = (gerenciada['codigo_empresa'] as String?)?.trim().toLowerCase() ?? '';
+    final tiles = (gerenciada['mapa_tiles'] as String?)?.trim() ?? '';
+    final tilesValidos =
+        tiles.startsWith('https://') && tiles.contains('{z}') && tiles.contains('{x}') && tiles.contains('{y}');
+    final atribuicao = (gerenciada['mapa_atribuicao'] as String?)?.trim() ?? '';
     return Configuracao(
       api: Uri.parse(api),
       identidade: Uri.parse(identidade),
       permitirHttp: api.startsWith('http://') || identidade.startsWith('http://'),
-      mapa: const bool.hasEnvironment('AURORA_MAPA_TILES')
+      empresaGerenciada: codigoDeEmpresaValido(codigo) ? codigo : null,
+      mapa: tilesValidos
+          ? FundoDoMapa(tiles: tiles, atribuicao: atribuicao.isEmpty ? '© Provedor do mapa' : atribuicao)
+          : const bool.hasEnvironment('AURORA_MAPA_TILES')
           ? const FundoDoMapa(
               tiles: String.fromEnvironment('AURORA_MAPA_TILES'),
               atribuicao: String.fromEnvironment('AURORA_MAPA_ATRIBUICAO'),
@@ -45,6 +68,8 @@ class Configuracao {
           : osm,
     );
   }
+
+  static bool codigoDeEmpresaValido(String codigo) => RegExp(r'^[a-z0-9][a-z0-9-]{1,39}$').hasMatch(codigo);
 
   /// API da Aurora (sem barra no fim).
   final Uri api;
@@ -64,6 +89,9 @@ class Configuracao {
   final bool permitirHttp;
 
   final FundoDoMapa mapa;
+
+  /// Código da empresa fixado pelo MDM: o app não pergunta nem deixa trocar.
+  final String? empresaGerenciada;
 
   Uri emissor(String codigoEmpresa) =>
       Uri.parse('${identidade.toString().replaceAll(RegExp(r'/$'), '')}/realms/$codigoEmpresa');

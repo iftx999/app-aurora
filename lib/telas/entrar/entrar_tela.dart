@@ -65,11 +65,14 @@ class _EntrarTelaState extends ConsumerState<EntrarTela> {
             label: const Text('Entrar com a conta da empresa'),
           ),
         ),
-        const SizedBox(height: 8),
-        TextButton(
-          onPressed: _entrando ? null : () => ref.read(sessaoProvider.notifier).sessao.trocarEmpresa(),
-          child: const Text('Trocar empresa'),
-        ),
+        // Empresa definida pelo MDM (Android Enterprise): sem troca no celular.
+        if (!ref.read(sessaoProvider.notifier).sessao.empresaFixa) ...[
+          const SizedBox(height: 8),
+          TextButton(
+            onPressed: _entrando ? null : () => ref.read(sessaoProvider.notifier).sessao.trocarEmpresa(),
+            child: const Text('Trocar empresa'),
+          ),
+        ],
       ],
       rodape: Text(
         'Depois do login, você cria um PIN de 6 números para abrir o app, inclusive sem sinal.',

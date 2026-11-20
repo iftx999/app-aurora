@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Configuração gerenciada (Android Enterprise): o console do MDM preenche estes campos por empresa e o app os lê
+     ao abrir (docs/publicacao-android-enterprise.md). Vazio = valor da compilação. -->
+<restrictions xmlns:android="http://schemas.android.com/apk/res/android">
+    <restriction
+        android:key="api_url"
+        android:title="@string/restricao_api_url"
+        android:description="@string/restricao_api_url_descricao"
+        android:restrictionType="string" />
+    <restriction
+        android:key="identidade_url"
+        android:title="@string/restricao_identidade_url"
+        android:description="@string/restricao_identidade_url_descricao"
+        android:restrictionType="string" />
+    <restriction
+        android:key="codigo_empresa"
+        android:title="@string/restricao_codigo_empresa"
+        android:description="@string/restricao_codigo_empresa_descricao"
+        android:restrictionType="string" />
+    <restriction
+        android:key="mapa_tiles"
+        android:title="@string/restricao_mapa_tiles"
+        android:description="@string/restricao_mapa_tiles_descricao"
+        android:restrictionType="string" />
+    <restriction
+        android:key="mapa_atribuicao"
+        android:title="@string/restricao_mapa_atribuicao"
+        android:description="@string/restricao_mapa_atribuicao_descricao"
+        android:restrictionType="string" />
+</restrictions>

@@ -62,6 +62,13 @@ class Sessao implements Credenciais {
   }
 
   Future<void> iniciar() async {
+    final gerenciada = configuracao.empresaGerenciada;
+    final guardada = await cofre.ler(ChavesDoCofre.empresa);
+    if (gerenciada != null && gerenciada != guardada) {
+      // O MDM fixou (ou mudou) a empresa: os dados da anterior saem do celular, como na troca manual.
+      if (guardada != null) await _limparEmpresa();
+      await cofre.escrever(ChavesDoCofre.empresa, gerenciada);
+    }
     final empresa = await cofre.ler(ChavesDoCofre.empresa);
     if (empresa == null) {
       return _mudar(const SemEmpresa());
@@ -86,20 +93,28 @@ class Sessao implements Credenciais {
 
   Future<void> informarEmpresa(String codigo) async {
     final limpo = codigo.trim().toLowerCase();
-    if (!RegExp(r'^[a-z0-9][a-z0-9-]{1,39}$').hasMatch(limpo)) {
+    if (!Configuracao.codigoDeEmpresaValido(limpo)) {
       throw const FormatException('Código da empresa inválido.');
     }
     await cofre.escrever(ChavesDoCofre.empresa, limpo);
     _mudar(SemLogin(codigoEmpresa: limpo));
   }
 
+  /// Empresa fixada pelo MDM não se troca no celular.
+  bool get empresaFixa => configuracao.empresaGerenciada != null;
+
   Future<void> trocarEmpresa() async {
+    if (empresaFixa) return;
+    await _limparEmpresa();
+    await cofre.apagar(ChavesDoCofre.empresa);
+    _mudar(const SemEmpresa());
+  }
+
+  Future<void> _limparEmpresa() async {
     await apagarDadosLocais?.call();
     await _esquecerSessao();
     await cofre.apagar(ChavesDoCofre.pinResumo);
     await cofre.apagar(ChavesDoCofre.pinSal);
-    await cofre.apagar(ChavesDoCofre.empresa);
-    _mudar(const SemEmpresa());
   }
 
   /// Login no navegador do sistema e cadastro do celular. Falha de rede propaga para a tela avisar.

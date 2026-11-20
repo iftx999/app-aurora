@@ -37,7 +37,11 @@ class IdentidadeFalsa implements ProvedorIdentidade {
       throw Exception('sem rede');
     }
     renovacoes++;
-    return Tokens(acesso: tokenCom({'given_name': 'Ana', 'n': renovacoes}), expiraEm: agora().add(const Duration(minutes: 5)), renovacao: 'r2');
+    return Tokens(
+      acesso: tokenCom({'given_name': 'Ana', 'n': renovacoes}),
+      expiraEm: agora().add(const Duration(minutes: 5)),
+      renovacao: 'r2',
+    );
   }
 
   @override
@@ -170,5 +174,46 @@ void main() {
     expect((sessao.estado as Bloqueada).biometria, isTrue);
     await sessao.desbloquearComBiometria();
     expect(sessao.estado, isA<Desbloqueada>());
+  });
+
+  group('empresa fixada pelo MDM (Android Enterprise)', () {
+    Sessao gerenciada(String empresa) => Sessao(
+      configuracao: Configuracao(
+        api: Uri.parse('http://api'),
+        identidade: Uri.parse('http://kc/'),
+        empresaGerenciada: empresa,
+      ),
+      cofre: cofre,
+      identidade: identidade,
+      biometria: BiometriaFalsa(),
+      agora: () => agora,
+      aoMudar: estados.add,
+    );
+
+    test('não pergunta a empresa e não deixa trocar', () async {
+      final sessao = gerenciada('aurora');
+      await sessao.iniciar();
+      expect((sessao.estado as SemLogin).codigoEmpresa, 'aurora');
+      expect(sessao.empresaFixa, isTrue);
+      await sessao.trocarEmpresa();
+      expect(sessao.estado, isA<SemLogin>());
+      expect(cofre.valores[ChavesDoCofre.empresa], 'aurora');
+    });
+
+    test('o MDM mudou a empresa: os dados da anterior saem do celular', () async {
+      final antes = nova();
+      await antes.iniciar();
+      await antes.informarEmpresa('outra');
+      await antes.entrar();
+      await antes.criarPin('482913');
+      var apagou = false;
+
+      final depois = gerenciada('aurora')..apagarDadosLocais = () async => apagou = true;
+      await depois.iniciar();
+      expect(apagou, isTrue);
+      expect((depois.estado as SemLogin).codigoEmpresa, 'aurora');
+      expect(cofre.valores[ChavesDoCofre.tokens], isNull);
+      expect(cofre.valores[ChavesDoCofre.pinResumo], isNull);
+    });
   });
 }

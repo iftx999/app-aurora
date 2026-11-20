@@ -46,10 +46,10 @@ Future<void> digitar(WidgetTester tester, String pin) async {
 }
 
 void main() {
-  Widget app(CofreEmMemoria cofre, ApiFalsa api) => ProviderScope(
+  Widget app(CofreEmMemoria cofre, ApiFalsa api, {String? empresaDoMdm}) => ProviderScope(
     overrides: [
       configuracaoProvider.overrideWithValue(
-        Configuracao(api: Uri.parse('http://api'), identidade: Uri.parse('http://kc')),
+        Configuracao(api: Uri.parse('http://api'), identidade: Uri.parse('http://kc'), empresaGerenciada: empresaDoMdm),
       ),
       cofreProvider.overrideWithValue(cofre),
       identidadeProvider.overrideWithValue(IdentidadeFalsa()),
@@ -64,6 +64,14 @@ void main() {
     ],
     child: const AuroraApp(),
   );
+
+  testWidgets('empresa definida pelo MDM: vai direto ao login, sem "Trocar empresa"', (tester) async {
+    await tester.pumpWidget(app(CofreEmMemoria(), ApiFalsa(), empresaDoMdm: 'aurora'));
+    await tester.pumpAndSettle();
+    expect(find.text('Código da empresa'), findsNothing);
+    expect(find.text('Empresa: aurora'), findsOneWidget);
+    expect(find.text('Trocar empresa'), findsNothing);
+  });
 
   testWidgets('primeiro uso até o início, e o PIN na reabertura', (tester) async {
     final cofre = CofreEmMemoria();

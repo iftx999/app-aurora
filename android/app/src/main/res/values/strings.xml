@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Textos que o console do MDM mostra para a configuração gerenciada (res/xml/app_restrictions.xml). -->
+<resources>
+    <string name="restricao_api_url">Endereço da API da Aurora</string>
+    <string name="restricao_api_url_descricao">HTTPS, sem barra no fim. Ex.: https://api.aurora.empresa.com.br</string>
+    <string name="restricao_identidade_url">Endereço do login (Keycloak)</string>
+    <string name="restricao_identidade_url_descricao">HTTPS, sem o /realms. Ex.: https://login.aurora.empresa.com.br</string>
+    <string name="restricao_codigo_empresa">Código da empresa</string>
+    <string name="restricao_codigo_empresa_descricao">Fixa a empresa no celular (o agente não escolhe nem troca). Letras minúsculas, números e hífen.</string>
+    <string name="restricao_mapa_tiles">Tiles do mapa</string>
+    <string name="restricao_mapa_tiles_descricao">Modelo HTTPS com {z}/{x}/{y} do provedor contratado ou servidor próprio.</string>
+    <string name="restricao_mapa_atribuicao">Atribuição do mapa</string>
+    <string name="restricao_mapa_atribuicao_descricao">Texto exigido pelo provedor dos tiles. Ex.: © Provedor</string>
+</resources>

@@ -15,12 +15,17 @@ execução com fila local que funciona sem sinal, fotos e sincronização com `/
 - Keycloak: cliente público `aurora-campo` (PKCE, `dev.aurora.campo:/oauthredirect`, escopo `offline_access`) no
   realm de cada empresa.
 
+- Android Enterprise: endereços, empresa e mapa também vêm da **configuração gerenciada** do MDM, que vale sobre os
+  da compilação (um só APK para todas as empresas). Publicação, chave de assinatura e política dos aparelhos em
+  [docs/publicacao-android-enterprise.md](docs/publicacao-android-enterprise.md).
+
 ## Comandos
 
 ```
 flutter analyze
 flutter test
 flutter build apk --debug
+flutter build appbundle --release --build-number=<n>   # exige AURORA_ASSINATURA_* (ver docs)
 ```
 
 ## Estrutura

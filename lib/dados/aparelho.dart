@@ -12,6 +12,17 @@ abstract interface class Aparelho {
 class AparelhoAndroid implements Aparelho {
   static const _canal = MethodChannel('dev.aurora.campo/aparelho');
 
+  /// Configuração gerenciada do Android Enterprise (chaves de `res/xml/app_restrictions.xml`); vazia sem MDM.
+  static Future<Map<String, Object?>> configuracaoGerenciada() async {
+    try {
+      return await _canal.invokeMapMethod<String, Object?>('configuracaoGerenciada') ?? const {};
+    } on PlatformException {
+      return const {};
+    } on MissingPluginException {
+      return const {};
+    }
+  }
+
   @override
   Future<({int nivel, bool carregando})?> bateria() async {
     try {

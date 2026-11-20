@@ -1,6 +1,8 @@
 package dev.aurora.campo
 
 import android.Manifest
+import android.content.Context
+import android.content.RestrictionsManager
 import android.content.pm.PackageManager
 import android.os.BatteryManager
 import android.os.Build
@@ -33,6 +35,16 @@ class MainActivity : FlutterFragmentActivity() {
                             PackageManager.PERMISSION_GRANTED
                         if (falta) requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 7301)
                         resposta.success(!falta)
+                    }
+                    "configuracaoGerenciada" -> {
+                        // Android Enterprise: só os textos definidos pelo MDM (vazio quando não há MDM).
+                        val restricoes = (getSystemService(Context.RESTRICTIONS_SERVICE) as RestrictionsManager)
+                            .applicationRestrictions
+                        resposta.success(
+                            restricoes.keySet()
+                                .mapNotNull { chave -> restricoes.getString(chave)?.let { chave to it } }
+                                .toMap()
+                        )
                     }
                     else -> resposta.notImplemented()
                 }

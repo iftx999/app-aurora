@@ -29,12 +29,34 @@ android {
         manifestPlaceholders["appAuthRedirectScheme"] = "dev.aurora.campo"
     }
 
-    buildTypes {
-        release {
-            // A assinatura de publicação interna (MDM da empresa) entra no pipeline do M6; até lá, chave de debug.
-            signingConfig = signingConfigs.getByName("debug")
+    // Chave de publicação (Android Enterprise, app privado): só por variáveis de ambiente, nunca no repositório
+    // (docs/publicacao-android-enterprise.md). Sem elas, o build de release para com o motivo.
+    val chave = System.getenv("AURORA_ASSINATURA_ARQUIVO")
+    signingConfigs {
+        if (chave != null) {
+            create("publicacao") {
+                storeFile = file(chave)
+                storePassword = System.getenv("AURORA_ASSINATURA_SENHA")
+                keyAlias = System.getenv("AURORA_ASSINATURA_ALIAS")
+                keyPassword = System.getenv("AURORA_ASSINATURA_SENHA_CHAVE") ?: System.getenv("AURORA_ASSINATURA_SENHA")
+            }
         }
     }
+
+    buildTypes {
+        release {
+            signingConfig = if (chave != null) signingConfigs.getByName("publicacao") else null
+        }
+    }
+}
+
+// Release sem a chave não sai (um APK assinado com a chave de debug não pode ir para o MDM).
+val pedeRelease = gradle.startParameter.taskNames.any { it.contains("Release", ignoreCase = true) }
+if (pedeRelease && System.getenv("AURORA_ASSINATURA_ARQUIVO") == null) {
+    throw GradleException(
+        "Defina AURORA_ASSINATURA_ARQUIVO, AURORA_ASSINATURA_SENHA e AURORA_ASSINATURA_ALIAS para gerar o release " +
+            "(docs/publicacao-android-enterprise.md)."
+    )
 }
 
 kotlin {
