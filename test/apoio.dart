@@ -176,6 +176,17 @@ class ApiFalsa extends ApiCampo {
     return (mudou: true, json: r, etag: etag);
   }
 
+  /// Confirmações recebidas em `POST /rota/confirmacao`; [erroNaConfirmacao] é lançado no lugar da resposta.
+  final confirmacoesDeRota = <({String id, DateTime em})>[];
+  Object? erroNaConfirmacao;
+
+  @override
+  Future<void> confirmarRota(String roteirizacaoId, DateTime confirmadaEm) async {
+    _rede();
+    if (erroNaConfirmacao case final e?) throw e;
+    confirmacoesDeRota.add((id: roteirizacaoId, em: confirmadaEm));
+  }
+
   /// Lotes recebidos em `POST /posicoes`; [erroNasPosicoes] é lançado no lugar da resposta.
   final lotesDePosicoes = <List<AmostraDePosicao>>[];
   ErroDaApi? erroNasPosicoes;
@@ -340,6 +351,11 @@ class PosicoesFalsas implements FonteDePosicoes {
 class AparelhoFalso implements Aparelho {
   ({int nivel, bool carregando})? carga = (nivel: 80, carregando: false);
   int pedidosDeNotificacao = 0;
+  final avisos = <({int id, String titulo, String texto})>[];
+
+  @override
+  Future<void> avisar({required int id, required String titulo, required String texto}) async =>
+      avisos.add((id: id, titulo: titulo, texto: texto));
 
   @override
   Future<({int nivel, bool carregando})?> bateria() async => carga;
@@ -352,9 +368,17 @@ class AparelhoFalso implements Aparelho {
 }
 
 /// Rota como o servidor devolve: três paradas a/b/c a leste da partida, pela malha.
-Map<String, dynamic> rotaJson({String id = 'r1', String origem = 'JORNADA', bool pelaMalha = true}) => {
+Map<String, dynamic> rotaJson({
+  String id = 'r1',
+  String origem = 'JORNADA',
+  bool pelaMalha = true,
+  List<String> ordem = const ['b', 'a', 'c'],
+  bool exigeConfirmacao = false,
+}) => {
   'roteirizacaoId': id,
   'origem': origem,
+  'exigeConfirmacao': exigeConfirmacao,
+  'confirmadaEm': null,
   'calculo': pelaMalha ? 'VALHALLA' : 'LINHA_RETA',
   'publicadaEm': agoraDosTestes.toUtc().toIso8601String(),
   'inicio': agoraDosTestes.toUtc().toIso8601String(),
@@ -374,7 +398,7 @@ Map<String, dynamic> rotaJson({String id = 'r1', String origem = 'JORNADA', bool
         ]
       : const [],
   'paradas': [
-    for (final (i, os) in ['b', 'a', 'c'].indexed)
+    for (final (i, os) in ordem.indexed)
       {
         'ordemServicoId': os,
         'ordem': i + 1,

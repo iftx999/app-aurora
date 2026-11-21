@@ -44,6 +44,14 @@ class RotaDoDia {
   int get minutosDeslocamento => (json['minutosDeslocamento'] as num).toInt();
   DateTime get fimPrevisto => DateTime.parse(json['fimPrevisto'] as String);
 
+  /// Publicada no meio da jornada: o agente confere e confirma a nova ordem (ADR 0050).
+  bool get exigeConfirmacao => json['exigeConfirmacao'] as bool? ?? false;
+  DateTime? get confirmadaEm => json['confirmadaEm'] == null ? null : DateTime.parse(json['confirmadaEm'] as String);
+  DateTime? get publicadaEm => json['publicadaEm'] == null ? null : DateTime.parse(json['publicadaEm'] as String);
+
+  /// Ids das OS na ordem da rota.
+  List<String> get ordem => [for (final p in paradas) p.osId];
+
   Posicao? get partida => json['partidaLatitude'] == null
       ? null
       : Posicao((json['partidaLatitude'] as num).toDouble(), (json['partidaLongitude'] as num).toDouble());

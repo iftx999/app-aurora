@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 
 import '../app/dependencias.dart';
+import '../app/tema_do_dia.dart';
 import '../autenticacao/estado_sessao.dart';
 import '../dados/api/api_campo.dart';
 import '../dados/api/erros.dart';
@@ -28,6 +29,7 @@ class EstadoDoDia {
     this.erro,
     this.abrirAjustes = false,
     this.rota,
+    this.rotaNova,
   });
 
   /// Já leu o que estava guardado no celular.
@@ -49,8 +51,12 @@ class EstadoDoDia {
   /// O erro só se resolve nos ajustes do Android (permissão negada de vez).
   final bool abrirAjustes;
 
-  /// Rota publicada da equipe (mapa); nula até haver uma.
+  /// Rota publicada da equipe que vale no celular (mapa e ordem da lista); nula até haver uma.
   final RotaDoDia? rota;
+
+  /// Nova ordem publicada no meio da jornada, esperando o agente conferir e confirmar (J7, ADR 0050). Enquanto
+  /// isso, a lista segue a [rota]; sem sinal, o agente continua na ordem que já tem.
+  final RotaDoDia? rotaNova;
 
   bool get emJornada => inicioPendente != null || (pacote?.jornada?.aberta ?? false);
 
@@ -66,6 +72,7 @@ class EstadoDoDia {
     String? Function()? erro,
     bool? abrirAjustes,
     RotaDoDia? Function()? rota,
+    RotaDoDia? Function()? rotaNova,
   }) => EstadoDoDia(
     carregado: carregado ?? this.carregado,
     equipes: equipes ?? this.equipes,
@@ -77,6 +84,7 @@ class EstadoDoDia {
     erro: erro == null ? this.erro : erro(),
     abrirAjustes: abrirAjustes ?? this.abrirAjustes,
     rota: semPacote ? null : (rota == null ? this.rota : rota()),
+    rotaNova: semPacote ? null : (rotaNova == null ? this.rotaNova : rotaNova()),
   );
 }
 
@@ -114,7 +122,9 @@ class ControleDoDia extends Notifier<EstadoDoDia> {
     // Cada mudança da fila (ação nova, resposta do servidor) redesenha a situação das OS.
     ref.listen(filaProvider.select((f) => f.versao), (_, _) => _mostrar());
     ref.listen(filaProvider.select((f) => f.recebimentos), (_, _) => aoReceberDaFila());
+    final verificacao = Timer.periodic(intervaloDaRota, (_) => unawaited(verificarRota()));
     ref.onDispose(() {
+      verificacao.cancel();
       for (final t in _consultasDaRota) {
         t.cancel();
       }
@@ -128,6 +138,15 @@ class ControleDoDia extends Notifier<EstadoDoDia> {
   /// A rota da jornada é calculada no servidor depois do início (ADR 0048): o app pergunta de novo algumas vezes.
   static const consultasDaRota = [Duration(seconds: 15), Duration(seconds: 45)];
   final _consultasDaRota = <Timer>[];
+
+  /// Em jornada, a rota é conferida (só o ETag, sem baixar de novo) a cada 2 min: uma reotimização publicada pelo
+  /// programador chega sem o agente precisar puxar a tela.
+  static const intervaloDaRota = Duration(minutes: 2);
+
+  /// Id da notificação do Android da nova ordem (a seguinte substitui a anterior).
+  static const avisoDaRotaNova = 7302;
+
+  /// ETag da última rota do servidor que o celular tem (a valendo ou a que espera confirmação).
   String? _etagDaRota;
 
   /// Lê o que está no celular e tenta atualizar pela API (uma vez por sessão; depois, [atualizar]).
@@ -137,13 +156,15 @@ class ControleDoDia extends Notifier<EstadoDoDia> {
     final guardado = await _armazem.lerPacote();
     final pendente = await _armazem.lerInicioPendente();
     final rota = await _armazem.lerRota();
+    final nova = await _armazem.lerRotaNova();
     _doServidor = guardado == null ? null : PacoteDoDia(guardado.pacote);
-    _etagDaRota = rota?.etag;
+    _etagDaRota = nova?.etag ?? rota?.etag;
     state = state.copiar(
       carregado: true,
       baixadoEm: guardado?.baixadoEm,
       inicioPendente: () => pendente,
       rota: () => rota == null ? null : RotaDoDia(rota.rota),
+      rotaNova: () => nova == null ? null : RotaDoDia(nova.rota),
     );
     await _mostrar();
     await atualizar();
@@ -176,19 +197,102 @@ class ControleDoDia extends Notifier<EstadoDoDia> {
           .pacote(desde: _deHoje(pacote) ? pacote.versao : null, equipe: pacote.equipeId);
       await _guardar(resposta);
     }
-    if (state.emJornada) await _atualizarRota();
+    if (state.emJornada) {
+      await _atualizarRota();
+      await _enviarConfirmacao();
+    }
   });
 
-  /// Baixa a rota só quando mudou (ETag). Sem jornada no servidor (409), fica a que estava.
+  /// Baixa a rota só quando mudou (ETag). Sem jornada no servidor (409), fica a que estava. Uma nova ordem
+  /// publicada no meio da jornada espera o agente confirmar (ADR 0050) e gera um aviso do Android.
   Future<void> _atualizarRota() async {
     try {
       final r = await ref.read(apiCampoProvider).rota(conhecida: _etagDaRota);
       if (!r.mudou) return;
-      await _armazem.guardarRota(r.json, etag: r.etag);
       _etagDaRota = r.etag;
-      state = state.copiar(rota: () => r.json == null ? null : RotaDoDia(r.json!));
+      final json = r.json;
+      if (json == null) {
+        await _armazem.guardarRota(null);
+        await _armazem.guardarRotaNova(null);
+        state = state.copiar(rota: () => null, rotaNova: () => null);
+        await _mostrar();
+        return;
+      }
+      final nova = RotaDoDia(json);
+      final atual = state.rota;
+      if (nova.exigeConfirmacao && nova.confirmadaEm == null && atual != null && atual.id != nova.id) {
+        final jaAvisada = state.rotaNova?.id == nova.id;
+        await _armazem.guardarRotaNova(json, etag: r.etag);
+        state = state.copiar(rotaNova: () => nova);
+        await _mostrar();
+        if (!jaAvisada) {
+          await ref
+              .read(aparelhoProvider)
+              .avisar(
+                id: avisoDaRotaNova,
+                titulo: 'Nova ordem das OS',
+                texto: 'A rota de hoje foi reorganizada. Abra o app para conferir e confirmar.',
+              );
+        }
+        return;
+      }
+      await _armazem.guardarRota(json, etag: r.etag);
+      await _armazem.guardarRotaNova(null);
+      state = state.copiar(rota: () => nova, rotaNova: () => null);
+      await _mostrar();
+      if (nova.partida case final p?) {
+        unawaited(ref.read(temaDoDiaProvider.notifier).informarLocal(p.latitude, p.longitude));
+      }
+      // Sem rota anterior não há o que comparar: a nova ordem já é a da lista.
+      if (nova.exigeConfirmacao && nova.confirmadaEm == null) await _registrarConfirmacao(nova.id);
     } on ErroDaApi catch (e) {
       if (e.celularRevogado) rethrow;
+    }
+  }
+
+  /// O agente conferiu a nova ordem: passa a valer na lista e no mapa, e a confirmação vai ao servidor (ou fica
+  /// guardada até o sinal voltar).
+  Future<void> confirmarRotaNova() async {
+    final nova = state.rotaNova;
+    if (nova == null) return;
+    final guardada = await _armazem.lerRotaNova();
+    await _armazem.guardarRota(nova.json, etag: guardada?.etag ?? _etagDaRota);
+    await _armazem.guardarRotaNova(null);
+    state = state.copiar(rota: () => nova, rotaNova: () => null);
+    await _mostrar();
+    await _registrarConfirmacao(nova.id);
+  }
+
+  Future<void> _registrarConfirmacao(String roteirizacaoId) async {
+    await _armazem.guardarConfirmacaoPendente((roteirizacaoId: roteirizacaoId, confirmadaEm: _agora()));
+    await _enviarConfirmacao();
+  }
+
+  /// Envia a confirmação guardada. Sem sinal, fica para a próxima; recusada (rota já substituída), é esquecida.
+  Future<void> _enviarConfirmacao() async {
+    final pendente = await _armazem.lerConfirmacaoPendente();
+    if (pendente == null) return;
+    try {
+      await ref.read(apiCampoProvider).confirmarRota(pendente.roteirizacaoId, pendente.confirmadaEm);
+      await _armazem.guardarConfirmacaoPendente(null);
+    } on SemConexao {
+      // Vai na próxima atualização.
+    } on ErroDaApi catch (e) {
+      if (e.celularRevogado) rethrow;
+      await _armazem.guardarConfirmacaoPendente(null);
+    }
+  }
+
+  /// Conferência periódica em jornada (sem marcar ocupado nem mostrar erro): rota nova e confirmação pendente.
+  Future<void> verificarRota() async {
+    if (!ref.mounted || !state.carregado || !state.emJornada || state.ocupado || state.inicioPendente != null) return;
+    try {
+      await _atualizarRota();
+      await _enviarConfirmacao();
+    } on SemConexao {
+      // Sem sinal: segue a ordem que já tem.
+    } on ErroDaApi catch (e) {
+      if (e.celularRevogado) await ref.read(sessaoProvider.notifier).sessao.revogar();
     }
   }
 
@@ -329,6 +433,7 @@ class ControleDoDia extends Notifier<EstadoDoDia> {
       // 10.9.6: o pacote antigo sai do celular ao encerrar a jornada.
       await _armazem.apagarPacote();
       await _armazem.guardarRota(null);
+      await _armazem.guardarRotaNova(null);
       _etagDaRota = null;
       _doServidor = null;
       state = state.copiar(semPacote: true);
@@ -367,7 +472,12 @@ class ControleDoDia extends Notifier<EstadoDoDia> {
                   (e.respondidoEm?.isAfter(baixado) ?? true)),
         )
         .map((e) => (osId: e.evento.osId, destino: e.evento.acao.destino));
-    state = state.copiar(pacote: pacote.comAcoes(acoes));
+    final comAcoes = pacote.comAcoes(acoes);
+    // Nova ordem ainda não confirmada: a lista segue a rota que vale no celular.
+    final valendo = state.rota;
+    state = state.copiar(
+      pacote: state.rotaNova != null && valendo != null ? comAcoes.naOrdem(valendo.ordem) : comAcoes,
+    );
   }
 
   /// Roda a chamada marcando ocupado; falta de rede vira [semSinal] (ou o aviso), revogação apaga tudo.

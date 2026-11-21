@@ -7,6 +7,9 @@ abstract interface class Aparelho {
 
   /// Pede a permissão de notificação (Android 13+), sem esperar a resposta; verdadeiro se já havia.
   Future<bool> pedirNotificacoes();
+
+  /// Notificação do Android que abre o app ao tocar (ex.: nova ordem das OS para confirmar); [id] repetido substitui.
+  Future<void> avisar({required int id, required String titulo, required String texto});
 }
 
 class AparelhoAndroid implements Aparelho {
@@ -34,6 +37,17 @@ class AparelhoAndroid implements Aparelho {
       return null;
     } on MissingPluginException {
       return null;
+    }
+  }
+
+  @override
+  Future<void> avisar({required int id, required String titulo, required String texto}) async {
+    try {
+      await _canal.invokeMethod<void>('avisar', {'id': id, 'titulo': titulo, 'texto': texto});
+    } on PlatformException {
+      // Sem permissão de notificação: o aviso continua na tela Hoje.
+    } on MissingPluginException {
+      // Fora do Android (testes).
     }
   }
 

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'rotas.dart';
 import 'tema.dart';
+import 'tema_do_dia.dart';
 
 class AuroraApp extends ConsumerWidget {
   const AuroraApp({super.key});
@@ -15,8 +16,8 @@ class AuroraApp extends ConsumerWidget {
       debugShowCheckedModeBanner: false,
       theme: temaAurora(Brightness.light),
       darkTheme: temaAurora(Brightness.dark),
-      // Segue o celular (claro de dia, escuro à noite); a escolha manual fica para quando o cliente decidir (10.14).
-      themeMode: ThemeMode.system,
+      // Modo noturno: escuro entre o pôr e o nascer do sol, ou a escolha do agente no menu.
+      themeMode: ref.watch(temaDoDiaProvider).modo,
       locale: const Locale('pt', 'BR'),
       supportedLocales: const [Locale('pt', 'BR')],
       localizationsDelegates: GlobalMaterialLocalizations.delegates,

@@ -14,6 +14,7 @@ import '../comum/navegar.dart';
 import '../fila/fila_tela.dart';
 import '../mapa/mapa_tela.dart';
 import '../ordem/ordem_tela.dart';
+import 'nova_rota_tela.dart';
 
 /// "Hoje" (J8; protótipo `Main`): a OS atual com o botão Navegar e a lista do dia na ordem da rota.
 class HojeTela extends ConsumerWidget {
@@ -87,6 +88,7 @@ class HojeTela extends ConsumerWidget {
             const SizedBox(height: 8),
             const _Fila(),
             const _Coleta(),
+            if (dia.rotaNova != null) ...[const SizedBox(height: 8), const _NovaOrdem()],
             const SizedBox(height: 12),
             if (pacote == null || pacote.ordens.isEmpty)
               Padding(
@@ -267,6 +269,54 @@ String _pendencias(int acoes, int fotos) {
     if (fotos > 0) fotos == 1 ? '1 foto' : '$fotos fotos',
   ];
   return '${partes.join(' e ')} ${acoes + fotos == 1 ? 'pendente' : 'pendentes'}';
+}
+
+/// J7 (ADR 0050): a nova ordem publicada espera o agente conferir; até lá, a lista segue a ordem anterior.
+class _NovaOrdem extends StatelessWidget {
+  const _NovaOrdem();
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.cores;
+    return Card(
+      margin: EdgeInsets.zero,
+      color: c.superficie,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: c.atencao, width: 2),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.alt_route_rounded, color: c.atencao),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Nova ordem das OS',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'A rota foi reorganizada. Confira antes de seguir para a próxima parada.',
+              style: TextStyle(color: c.textoSecundario),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(onPressed: () => abrirNovaRota(context), child: const Text('Conferir e confirmar')),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _CartaoAtual extends StatelessWidget {

@@ -114,6 +114,12 @@ class ApiCampo {
     };
   }
 
+  /// ADR 0050: o agente conferiu e confirmou a nova ordem das OS (repetir não muda a primeira confirmação).
+  Future<void> confirmarRota(String roteirizacaoId, DateTime confirmadaEm) => _cliente.postSemResposta(
+    '/api/v1/campo/rota/confirmacao',
+    {'roteirizacaoId': roteirizacaoId, 'confirmadaEm': confirmadaEm.toUtc().toIso8601String()},
+  );
+
   /// Quanto da foto o servidor já tem; nulo se nada chegou ainda.
   Future<AnexoNoServidor?> estadoDaFoto(String id) async {
     try {

@@ -104,6 +104,12 @@ class OrdemDoDia {
   final int ultimaSequencia;
 
   /// A mesma OS com a situação que o celular já registrou e o servidor ainda não mostrou.
+  OrdemDoDia comSequencia(int? sequencia) => OrdemDoDia(
+    {...json, 'sequenciaRota': sequencia},
+    servicoVersaoId: servicoVersaoId,
+    ultimaSequencia: ultimaSequencia,
+  );
+
   OrdemDoDia comStatus(StatusOrdem novo) =>
       OrdemDoDia({...json, 'status': novo.codigo}, servicoVersaoId: servicoVersaoId, ultimaSequencia: ultimaSequencia);
 
@@ -198,6 +204,14 @@ class PacoteDoDia {
       if (o != null && novo != null) porId[a.osId] = o.comStatus(novo);
     }
     return PacoteDoDia._(json, [for (final o in ordens) porId[o.id]!]);
+  }
+
+  /// O pacote na ordem de [ids] (a rota confirmada pelo agente enquanto a nova espera confirmação, ADR 0050): elas
+  /// recebem a posição 1, 2, …; as demais perdem a posição e vão para o fim, por prioridade e prazo.
+  PacoteDoDia naOrdem(List<String> ids) {
+    final posicao = {for (final (i, id) in ids.indexed) id: i + 1};
+    final lista = [for (final o in ordens) o.comSequencia(posicao[o.id])]..sort(_naRota);
+    return PacoteDoDia._(json, lista);
   }
 
   final Map<String, dynamic> json;

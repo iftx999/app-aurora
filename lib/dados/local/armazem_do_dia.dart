@@ -46,6 +46,14 @@ abstract interface class ArmazemDoDia {
   /// Última rota publicada baixada (para o mapa sem sinal) e o ETag dela; apagada com o pacote.
   Future<({Map<String, dynamic> rota, String? etag})?> lerRota();
   Future<void> guardarRota(Map<String, dynamic>? rota, {String? etag});
+
+  /// Rota publicada no meio da jornada que espera o agente confirmar (ADR 0050); a lista segue a [lerRota].
+  Future<({Map<String, dynamic> rota, String? etag})?> lerRotaNova();
+  Future<void> guardarRotaNova(Map<String, dynamic>? rota, {String? etag});
+
+  /// Confirmação da nova ordem feita sem sinal, a enviar quando a conexão voltar.
+  Future<({String roteirizacaoId, DateTime confirmadaEm})?> lerConfirmacaoPendente();
+  Future<void> guardarConfirmacaoPendente(({String roteirizacaoId, DateTime confirmadaEm})? confirmacao);
   Future<InicioPendente?> lerInicioPendente();
   Future<void> guardarInicioPendente(InicioPendente? inicio);
 
@@ -222,6 +230,35 @@ class ArmazemSqlCipher implements ArmazemDoDia {
   @override
   Future<void> guardarRota(Map<String, dynamic>? rota, {String? etag}) =>
       _escrever('rota', rota == null ? null : {'rota': rota, 'etag': etag});
+
+  @override
+  Future<({Map<String, dynamic> rota, String? etag})?> lerRotaNova() async {
+    final v = await _ler('rota_nova');
+    return v == null ? null : (rota: v['rota'] as Map<String, dynamic>, etag: v['etag'] as String?);
+  }
+
+  @override
+  Future<void> guardarRotaNova(Map<String, dynamic>? rota, {String? etag}) =>
+      _escrever('rota_nova', rota == null ? null : {'rota': rota, 'etag': etag});
+
+  @override
+  Future<({String roteirizacaoId, DateTime confirmadaEm})?> lerConfirmacaoPendente() async {
+    final v = await _ler('confirmacao_rota');
+    return v == null
+        ? null
+        : (roteirizacaoId: v['roteirizacaoId'] as String, confirmadaEm: DateTime.parse(v['confirmadaEm'] as String));
+  }
+
+  @override
+  Future<void> guardarConfirmacaoPendente(({String roteirizacaoId, DateTime confirmadaEm})? confirmacao) => _escrever(
+    'confirmacao_rota',
+    confirmacao == null
+        ? null
+        : {
+            'roteirizacaoId': confirmacao.roteirizacaoId,
+            'confirmadaEm': confirmacao.confirmadaEm.toUtc().toIso8601String(),
+          },
+  );
 
   @override
   Future<InicioPendente?> lerInicioPendente() async {
@@ -420,6 +457,8 @@ class ArmazemEmMemoria implements ArmazemDoDia {
   ({Map<String, dynamic> pacote, DateTime baixadoEm})? pacote;
   InicioPendente? inicio;
   ({Map<String, dynamic> rota, String? etag})? rota;
+  ({Map<String, dynamic> rota, String? etag})? rotaNova;
+  ({String roteirizacaoId, DateTime confirmadaEm})? confirmacaoPendente;
   final List<EventoNaFila> fila = [];
   final List<FotoDaOs> anexos = [];
   final List<PosicaoNaFila> filaDePosicoes = [];
@@ -441,6 +480,20 @@ class ArmazemEmMemoria implements ArmazemDoDia {
   @override
   Future<void> guardarRota(Map<String, dynamic>? rota, {String? etag}) async =>
       this.rota = rota == null ? null : (rota: rota, etag: etag);
+
+  @override
+  Future<({Map<String, dynamic> rota, String? etag})?> lerRotaNova() async => rotaNova;
+
+  @override
+  Future<void> guardarRotaNova(Map<String, dynamic>? rota, {String? etag}) async =>
+      rotaNova = rota == null ? null : (rota: rota, etag: etag);
+
+  @override
+  Future<({String roteirizacaoId, DateTime confirmadaEm})?> lerConfirmacaoPendente() async => confirmacaoPendente;
+
+  @override
+  Future<void> guardarConfirmacaoPendente(({String roteirizacaoId, DateTime confirmadaEm})? confirmacao) async =>
+      confirmacaoPendente = confirmacao;
 
   @override
   Future<InicioPendente?> lerInicioPendente() async => inicio;
@@ -539,6 +592,8 @@ class ArmazemEmMemoria implements ArmazemDoDia {
     pacote = null;
     inicio = null;
     rota = null;
+    rotaNova = null;
+    confirmacaoPendente = null;
     fila.clear();
     anexos.clear();
     filaDePosicoes.clear();
