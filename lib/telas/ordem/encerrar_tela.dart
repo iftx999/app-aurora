@@ -1,4 +1,4 @@
-import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -10,6 +10,7 @@ import '../../dados/modelos/dia.dart';
 import '../../dados/modelos/evento.dart';
 import '../../dados/modelos/foto.dart';
 import '../../execucao/formulario.dart';
+import '../comum/botao_de_acao.dart';
 import '../../jornada/controle_do_dia.dart';
 import '../../nucleo/datas.dart';
 
@@ -258,10 +259,7 @@ class _EncerrarTelaState extends ConsumerState<EncerrarTela> {
               ),
             ),
           const SizedBox(height: 8),
-          FilledButton(
-            onPressed: _salvando ? null : _salvar,
-            child: Text(_salvando ? 'Salvando…' : 'Salvar encerramento'),
-          ),
+          BotaoDeAcao(aoConfirmar: _salvando ? null : _salvar, rotulo: _salvando ? 'Salvando…' : 'Salvar encerramento'),
           const SizedBox(height: 8),
           Text(
             'Fica guardado no celular e vai para o servidor assim que houver sinal.',
@@ -449,15 +447,18 @@ class _CampoDoParametro extends StatelessWidget {
   }
 }
 
-class _Miniatura extends StatelessWidget {
+class _Miniatura extends ConsumerWidget {
   const _Miniatura({required this.foto, required this.aoTirar});
 
   final FotoGuardada foto;
   final VoidCallback aoTirar;
 
   @override
-  Widget build(BuildContext context) {
-    final arquivo = File(foto.caminho);
+  Widget build(BuildContext context, WidgetRef ref) {
+    final vazio = ColoredBox(
+      color: context.cores.linha,
+      child: Center(child: Text(hora(foto.tiradaEm))),
+    );
     return Stack(
       children: [
         ClipRRect(
@@ -465,17 +466,19 @@ class _Miniatura extends StatelessWidget {
           child: SizedBox(
             width: 96,
             height: 96,
-            child: arquivo.existsSync()
-                ? Image.file(
-                    arquivo,
-                    fit: BoxFit.cover,
-                    cacheWidth: 192,
-                    semanticLabel: 'Foto das ${hora(foto.tiradaEm)}',
-                  )
-                : ColoredBox(
-                    color: context.cores.linha,
-                    child: Center(child: Text(hora(foto.tiradaEm))),
-                  ),
+            // A foto fica criptografada no celular (ADR 0051): a miniatura é decifrada só na memória.
+            child: FutureBuilder<Uint8List>(
+              future: ref.read(arquivosDeFotoProvider).lerTudo(foto.caminho),
+              builder: (_, lida) => lida.hasData
+                  ? Image.memory(
+                      lida.data!,
+                      fit: BoxFit.cover,
+                      cacheWidth: 192,
+                      gaplessPlayback: true,
+                      semanticLabel: 'Foto das ${hora(foto.tiradaEm)}',
+                    )
+                  : vazio,
+            ),
           ),
         ),
         Positioned(

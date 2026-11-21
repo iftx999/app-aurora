@@ -8,6 +8,7 @@ import '../../dados/modelos/evento.dart';
 import '../../jornada/controle_do_dia.dart';
 import '../../nucleo/datas.dart';
 import '../../sincronizacao/controle_da_fila.dart';
+import '../comum/botao_de_acao.dart';
 import '../comum/navegar.dart';
 import 'encerrar_tela.dart';
 import 'motivo_tela.dart';
@@ -112,10 +113,10 @@ class OrdemTela extends ConsumerWidget {
     }
 
     final principal = switch (ordem.status) {
-      StatusOrdem.programada => FilledButton.icon(
-        onPressed: () => controle.registrar(ordem.id, AcaoDeCampo.iniciar),
-        icon: const Icon(Icons.play_arrow_rounded),
-        label: const Text('Iniciar OS'),
+      StatusOrdem.programada => BotaoDeAcao(
+        aoConfirmar: () => controle.registrar(ordem.id, AcaoDeCampo.iniciar),
+        icone: Icons.play_arrow_rounded,
+        rotulo: 'Iniciar OS',
       ),
       StatusOrdem.emExecucao => FilledButton.icon(
         onPressed: () =>
@@ -123,10 +124,10 @@ class OrdemTela extends ConsumerWidget {
         icon: const Icon(Icons.task_alt_rounded),
         label: const Text('Encerrar OS'),
       ),
-      StatusOrdem.paralisada => FilledButton.icon(
-        onPressed: () => controle.registrar(ordem.id, AcaoDeCampo.retomar),
-        icon: const Icon(Icons.play_arrow_rounded),
-        label: const Text('Retomar OS'),
+      StatusOrdem.paralisada => BotaoDeAcao(
+        aoConfirmar: () => controle.registrar(ordem.id, AcaoDeCampo.retomar),
+        icone: Icons.play_arrow_rounded,
+        rotulo: 'Retomar OS',
       ),
       _ => null,
     };

@@ -72,8 +72,9 @@ extension CoresDoContexto on BuildContext {
   CoresAurora get cores => Theme.of(this).extension<CoresAurora>()!;
 }
 
-/// Material 3 com as cores da Aurora; alvos de toque de 56 dp e texto maior (uso ao sol e com luva, 10.9.1).
-ThemeData temaAurora(Brightness brilho) {
+/// Material 3 com as cores da Aurora; alvos de toque de 56 dp e texto maior (uso ao sol e com luva, 10.9.1). No
+/// modo luva (ADR 0051), botões de 72 dp com texto maior.
+ThemeData temaAurora(Brightness brilho, {bool luva = false}) {
   final c = brilho == Brightness.dark ? CoresAurora.escuro : CoresAurora.claro;
   final esquema = ColorScheme(
     brightness: brilho,
@@ -92,20 +93,23 @@ ThemeData temaAurora(Brightness brilho) {
     surfaceContainer: c.superficie,
   );
   final base = ThemeData(colorScheme: esquema, useMaterial3: true, brightness: brilho);
-  final alvo = const Size.fromHeight(56);
+  final alvo = Size.fromHeight(luva ? 72 : 56);
+  final fonte = luva ? 18.0 : 16.0;
   final forma = RoundedRectangleBorder(borderRadius: BorderRadius.circular(14));
   return base.copyWith(
     scaffoldBackgroundColor: c.fundo,
     extensions: [c],
-    textTheme: base.textTheme.apply(bodyColor: c.texto, displayColor: c.texto).copyWith(
-      bodyLarge: base.textTheme.bodyLarge?.copyWith(fontSize: 17, color: c.texto),
-      bodyMedium: base.textTheme.bodyMedium?.copyWith(fontSize: 15, color: c.texto),
-    ),
+    textTheme: base.textTheme
+        .apply(bodyColor: c.texto, displayColor: c.texto)
+        .copyWith(
+          bodyLarge: base.textTheme.bodyLarge?.copyWith(fontSize: 17, color: c.texto),
+          bodyMedium: base.textTheme.bodyMedium?.copyWith(fontSize: 15, color: c.texto),
+        ),
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(
         minimumSize: alvo,
         shape: forma,
-        textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+        textStyle: TextStyle(fontSize: fonte, fontWeight: FontWeight.w700),
       ),
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(
@@ -113,12 +117,18 @@ ThemeData temaAurora(Brightness brilho) {
         minimumSize: alvo,
         shape: forma,
         side: BorderSide(color: c.linha, width: 1.5),
-        textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+        textStyle: TextStyle(fontSize: fonte, fontWeight: FontWeight.w600),
       ),
     ),
     textButtonTheme: TextButtonThemeData(
-      style: TextButton.styleFrom(minimumSize: const Size(48, 48), textStyle: const TextStyle(fontSize: 15)),
+      style: TextButton.styleFrom(
+        minimumSize: Size(luva ? 64 : 48, luva ? 64 : 48),
+        textStyle: TextStyle(fontSize: luva ? 17 : 15),
+      ),
     ),
+    iconButtonTheme: luva
+        ? IconButtonThemeData(style: IconButton.styleFrom(minimumSize: const Size(64, 64), iconSize: 30))
+        : null,
     inputDecorationTheme: InputDecorationTheme(
       border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),

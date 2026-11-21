@@ -1,6 +1,9 @@
 import 'package:flutter/services.dart';
 
 /// O que o app pergunta ao Android sem plugin (canal em `MainActivity.kt`).
+/// Canais de notificação do app (cada um com seu som e vibração, ajustáveis pelo agente no Android).
+enum CanalDeAviso { rota, emergencial }
+
 abstract interface class Aparelho {
   /// Nível da bateria (0 a 100) e se está carregando; nulo se o Android não informar.
   Future<({int nivel, bool carregando})?> bateria();
@@ -8,8 +11,9 @@ abstract interface class Aparelho {
   /// Pede a permissão de notificação (Android 13+), sem esperar a resposta; verdadeiro se já havia.
   Future<bool> pedirNotificacoes();
 
-  /// Notificação do Android que abre o app ao tocar (ex.: nova ordem das OS para confirmar); [id] repetido substitui.
-  Future<void> avisar({required int id, required String titulo, required String texto});
+  /// Notificação do Android que abre o app ao tocar; [id] repetido substitui. [canal]: a nova ordem das OS (padrão)
+  /// ou a OS emergencial, que toca e vibra mais forte (ADR 0051).
+  Future<void> avisar({required int id, required String titulo, required String texto, CanalDeAviso canal});
 }
 
 class AparelhoAndroid implements Aparelho {
@@ -41,9 +45,14 @@ class AparelhoAndroid implements Aparelho {
   }
 
   @override
-  Future<void> avisar({required int id, required String titulo, required String texto}) async {
+  Future<void> avisar({
+    required int id,
+    required String titulo,
+    required String texto,
+    CanalDeAviso canal = CanalDeAviso.rota,
+  }) async {
     try {
-      await _canal.invokeMethod<void>('avisar', {'id': id, 'titulo': titulo, 'texto': texto});
+      await _canal.invokeMethod<void>('avisar', {'id': id, 'titulo': titulo, 'texto': texto, 'canal': canal.name});
     } on PlatformException {
       // Sem permissão de notificação: o aviso continua na tela Hoje.
     } on MissingPluginException {

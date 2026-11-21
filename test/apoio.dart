@@ -351,11 +351,15 @@ class PosicoesFalsas implements FonteDePosicoes {
 class AparelhoFalso implements Aparelho {
   ({int nivel, bool carregando})? carga = (nivel: 80, carregando: false);
   int pedidosDeNotificacao = 0;
-  final avisos = <({int id, String titulo, String texto})>[];
+  final avisos = <({int id, String titulo, String texto, CanalDeAviso canal})>[];
 
   @override
-  Future<void> avisar({required int id, required String titulo, required String texto}) async =>
-      avisos.add((id: id, titulo: titulo, texto: texto));
+  Future<void> avisar({
+    required int id,
+    required String titulo,
+    required String texto,
+    CanalDeAviso canal = CanalDeAviso.rota,
+  }) async => avisos.add((id: id, titulo: titulo, texto: texto, canal: canal));
 
   @override
   Future<({int nivel, bool carregando})?> bateria() async => carga;

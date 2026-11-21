@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'rotas.dart';
 import 'tema.dart';
+import 'modo_luva.dart';
 import 'tema_do_dia.dart';
 
 class AuroraApp extends ConsumerWidget {
@@ -14,8 +15,8 @@ class AuroraApp extends ConsumerWidget {
     return MaterialApp.router(
       title: 'Aurora Campo',
       debugShowCheckedModeBanner: false,
-      theme: temaAurora(Brightness.light),
-      darkTheme: temaAurora(Brightness.dark),
+      theme: temaAurora(Brightness.light, luva: ref.watch(modoLuvaProvider)),
+      darkTheme: temaAurora(Brightness.dark, luva: ref.watch(modoLuvaProvider)),
       // Modo noturno: escuro entre o pôr e o nascer do sol, ou a escolha do agente no menu.
       themeMode: ref.watch(temaDoDiaProvider).modo,
       locale: const Locale('pt', 'BR'),

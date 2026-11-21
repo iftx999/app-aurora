@@ -54,6 +54,10 @@ abstract interface class ArmazemDoDia {
   /// Confirmação da nova ordem feita sem sinal, a enviar quando a conexão voltar.
   Future<({String roteirizacaoId, DateTime confirmadaEm})?> lerConfirmacaoPendente();
   Future<void> guardarConfirmacaoPendente(({String roteirizacaoId, DateTime confirmadaEm})? confirmacao);
+
+  /// OS emergenciais já avisadas ao agente (ADR 0051); nulo antes do primeiro pacote da jornada.
+  Future<List<String>?> lerEmergenciaisAvisadas();
+  Future<void> guardarEmergenciaisAvisadas(List<String>? ids);
   Future<InicioPendente?> lerInicioPendente();
   Future<void> guardarInicioPendente(InicioPendente? inicio);
 
@@ -240,6 +244,14 @@ class ArmazemSqlCipher implements ArmazemDoDia {
   @override
   Future<void> guardarRotaNova(Map<String, dynamic>? rota, {String? etag}) =>
       _escrever('rota_nova', rota == null ? null : {'rota': rota, 'etag': etag});
+
+  @override
+  Future<List<String>?> lerEmergenciaisAvisadas() async =>
+      ((await _ler('emergenciais_avisadas'))?['ids'] as List?)?.cast<String>();
+
+  @override
+  Future<void> guardarEmergenciaisAvisadas(List<String>? ids) =>
+      _escrever('emergenciais_avisadas', ids == null ? null : {'ids': ids});
 
   @override
   Future<({String roteirizacaoId, DateTime confirmadaEm})?> lerConfirmacaoPendente() async {
@@ -459,6 +471,7 @@ class ArmazemEmMemoria implements ArmazemDoDia {
   ({Map<String, dynamic> rota, String? etag})? rota;
   ({Map<String, dynamic> rota, String? etag})? rotaNova;
   ({String roteirizacaoId, DateTime confirmadaEm})? confirmacaoPendente;
+  List<String>? emergenciaisAvisadas;
   final List<EventoNaFila> fila = [];
   final List<FotoDaOs> anexos = [];
   final List<PosicaoNaFila> filaDePosicoes = [];
@@ -490,6 +503,12 @@ class ArmazemEmMemoria implements ArmazemDoDia {
 
   @override
   Future<({String roteirizacaoId, DateTime confirmadaEm})?> lerConfirmacaoPendente() async => confirmacaoPendente;
+
+  @override
+  Future<List<String>?> lerEmergenciaisAvisadas() async => emergenciaisAvisadas;
+
+  @override
+  Future<void> guardarEmergenciaisAvisadas(List<String>? ids) async => emergenciaisAvisadas = ids;
 
   @override
   Future<void> guardarConfirmacaoPendente(({String roteirizacaoId, DateTime confirmadaEm})? confirmacao) async =>
@@ -594,6 +613,7 @@ class ArmazemEmMemoria implements ArmazemDoDia {
     rota = null;
     rotaNova = null;
     confirmacaoPendente = null;
+    emergenciaisAvisadas = null;
     fila.clear();
     anexos.clear();
     filaDePosicoes.clear();

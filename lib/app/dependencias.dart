@@ -12,6 +12,7 @@ import '../dados/api/cliente_api.dart';
 import '../dados/aparelho.dart';
 import '../dados/camera.dart';
 import '../dados/local/arquivos_de_foto.dart';
+import '../dados/local/cifra_de_fotos.dart';
 import '../dados/local/armazem_do_dia.dart';
 import '../dados/localizacao.dart';
 import '../nucleo/configuracao.dart';
@@ -21,7 +22,7 @@ final configuracaoProvider = Provider<Configuracao>((ref) => Configuracao.doAmbi
 final cofreProvider = Provider<Cofre>((ref) => CofreSeguro());
 final identidadeProvider = Provider<ProvedorIdentidade>((ref) => ProvedorAppAuth(ref.watch(configuracaoProvider)));
 final armazemProvider = Provider<ArmazemDoDia>((ref) => ArmazemSqlCipher(ref.watch(cofreProvider)));
-final arquivosDeFotoProvider = Provider<ArquivosDeFoto>((ref) => ArquivosNoAparelho());
+final arquivosDeFotoProvider = Provider<ArquivosDeFoto>((ref) => ArquivosNoAparelho(CifraDoAndroid()));
 final cameraProvider = Provider<Camera>((ref) => CameraDoAparelho());
 final localizacaoProvider = Provider<Localizacao>((ref) => LocalizacaoDoAparelho());
 final fonteDePosicoesProvider = Provider<FonteDePosicoes>((ref) => PosicoesDoAparelho());

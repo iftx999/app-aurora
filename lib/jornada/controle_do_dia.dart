@@ -6,6 +6,7 @@ import 'package:uuid/uuid.dart';
 import '../app/dependencias.dart';
 import '../app/tema_do_dia.dart';
 import '../autenticacao/estado_sessao.dart';
+import '../dados/aparelho.dart';
 import '../dados/api/api_campo.dart';
 import '../dados/api/erros.dart';
 import '../dados/local/armazem_do_dia.dart';
@@ -30,6 +31,7 @@ class EstadoDoDia {
     this.abrirAjustes = false,
     this.rota,
     this.rotaNova,
+    this.emergenciasNovas = const [],
   });
 
   /// Já leu o que estava guardado no celular.
@@ -58,6 +60,9 @@ class EstadoDoDia {
   /// isso, a lista segue a [rota]; sem sinal, o agente continua na ordem que já tem.
   final RotaDoDia? rotaNova;
 
+  /// OS emergenciais que chegaram durante a jornada e o agente ainda não viu na tela (ADR 0051).
+  final List<String> emergenciasNovas;
+
   bool get emJornada => inicioPendente != null || (pacote?.jornada?.aberta ?? false);
 
   EstadoDoDia copiar({
@@ -73,6 +78,7 @@ class EstadoDoDia {
     bool? abrirAjustes,
     RotaDoDia? Function()? rota,
     RotaDoDia? Function()? rotaNova,
+    List<String>? emergenciasNovas,
   }) => EstadoDoDia(
     carregado: carregado ?? this.carregado,
     equipes: equipes ?? this.equipes,
@@ -85,6 +91,7 @@ class EstadoDoDia {
     abrirAjustes: abrirAjustes ?? this.abrirAjustes,
     rota: semPacote ? null : (rota == null ? this.rota : rota()),
     rotaNova: semPacote ? null : (rotaNova == null ? this.rotaNova : rotaNova()),
+    emergenciasNovas: semPacote ? const [] : (emergenciasNovas ?? this.emergenciasNovas),
   );
 }
 
@@ -122,7 +129,7 @@ class ControleDoDia extends Notifier<EstadoDoDia> {
     // Cada mudança da fila (ação nova, resposta do servidor) redesenha a situação das OS.
     ref.listen(filaProvider.select((f) => f.versao), (_, _) => _mostrar());
     ref.listen(filaProvider.select((f) => f.recebimentos), (_, _) => aoReceberDaFila());
-    final verificacao = Timer.periodic(intervaloDaRota, (_) => unawaited(verificarRota()));
+    final verificacao = Timer.periodic(intervaloDaRota, (_) => unawaited(verificarNovidades()));
     ref.onDispose(() {
       verificacao.cancel();
       for (final t in _consultasDaRota) {
@@ -145,6 +152,9 @@ class ControleDoDia extends Notifier<EstadoDoDia> {
 
   /// Id da notificação do Android da nova ordem (a seguinte substitui a anterior).
   static const avisoDaRotaNova = 7302;
+
+  /// Id da notificação da OS emergencial nova (ADR 0051).
+  static const avisoDeEmergencial = 7303;
 
   /// ETag da última rota do servidor que o celular tem (a valendo ou a que espera confirmação).
   String? _etagDaRota;
@@ -283,10 +293,19 @@ class ControleDoDia extends Notifier<EstadoDoDia> {
     }
   }
 
-  /// Conferência periódica em jornada (sem marcar ocupado nem mostrar erro): rota nova e confirmação pendente.
-  Future<void> verificarRota() async {
+  /// Conferência periódica em jornada (sem marcar ocupado nem mostrar erro): OS novas no pacote (emergencial toca o
+  /// alerta), rota nova e confirmação pendente.
+  Future<void> verificarNovidades() async {
     if (!ref.mounted || !state.carregado || !state.emJornada || state.ocupado || state.inicioPendente != null) return;
     try {
+      final pacote = _doServidor;
+      if (pacote != null) {
+        await _guardar(
+          await ref
+              .read(apiCampoProvider)
+              .pacote(desde: _deHoje(pacote) ? pacote.versao : null, equipe: pacote.equipeId),
+        );
+      }
       await _atualizarRota();
       await _enviarConfirmacao();
     } on SemConexao {
@@ -434,6 +453,7 @@ class ControleDoDia extends Notifier<EstadoDoDia> {
       await _armazem.apagarPacote();
       await _armazem.guardarRota(null);
       await _armazem.guardarRotaNova(null);
+      await _armazem.guardarEmergenciaisAvisadas(null);
       _etagDaRota = null;
       _doServidor = null;
       state = state.copiar(semPacote: true);
@@ -443,6 +463,39 @@ class ControleDoDia extends Notifier<EstadoDoDia> {
 
   void dispensarErro() => state = state.copiar(erro: () => null, abrirAjustes: false);
 
+  /// O agente viu o alerta da emergencial na tela.
+  void dispensarEmergencias() => state = state.copiar(emergenciasNovas: const []);
+
+  /// ADR 0051: OS emergencial que entra no pacote durante a jornada toca o alerta (som e vibração do canal
+  /// "emergencial") e aparece em destaque na tela Hoje. As que já estavam no primeiro pacote da jornada não tocam.
+  Future<void> _verificarEmergenciais(PacoteDoDia pacote) async {
+    final abertas = [
+      for (final o in pacote.ordens)
+        if (o.prioridade == Prioridade.emergencial && o.aberta) o,
+    ];
+    final avisadas = await _armazem.lerEmergenciaisAvisadas();
+    if (avisadas == null) {
+      await _armazem.guardarEmergenciaisAvisadas([for (final o in abertas) o.id]);
+      return;
+    }
+    final novas = [
+      for (final o in abertas)
+        if (!avisadas.contains(o.id)) o,
+    ];
+    if (novas.isEmpty) return;
+    await _armazem.guardarEmergenciaisAvisadas([...avisadas, for (final o in novas) o.id]);
+    state = state.copiar(emergenciasNovas: [...state.emergenciasNovas, for (final o in novas) o.id]);
+    final primeira = novas.first;
+    await ref
+        .read(aparelhoProvider)
+        .avisar(
+          id: avisoDeEmergencial,
+          titulo: novas.length == 1 ? 'OS emergencial nova' : '${novas.length} OS emergenciais novas',
+          texto: '${primeira.servicoNome} · ${primeira.endereco}',
+          canal: CanalDeAviso.emergencial,
+        );
+  }
+
   Future<void> _guardar(Map<String, dynamic> resposta) async {
     final atual = _doServidor;
     final novo = atual == null || resposta['diferenca'] != true ? PacoteDoDia(resposta) : atual.aplicar(resposta);
@@ -451,6 +504,7 @@ class ControleDoDia extends Notifier<EstadoDoDia> {
     _doServidor = novo;
     state = state.copiar(baixadoEm: agora);
     await _mostrar();
+    if (novo.jornada?.aberta ?? false) await _verificarEmergenciais(novo);
   }
 
   /// Pacote do servidor + as ações que ele ainda não reflete: as da fila, as que esperam o anterior e as recebidas

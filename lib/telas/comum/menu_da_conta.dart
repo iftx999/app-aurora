@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/dependencias.dart';
+import '../../app/modo_luva.dart';
 import '../../app/tema_do_dia.dart';
 
 /// Menu das telas do dia: ações da tela (como encerrar a jornada), tema, bloquear e sair.
@@ -20,6 +21,11 @@ class MenuDaConta extends ConsumerWidget {
       itemBuilder: (_) => [
         for (final MapEntry(:key, :value) in acoes.entries) PopupMenuItem(value: value, child: Text(key)),
         PopupMenuItem(value: () => escolherTema(context, ref), child: const Text('Tema da tela')),
+        CheckedPopupMenuItem(
+          value: () => ref.read(modoLuvaProvider.notifier).definir(!ref.read(modoLuvaProvider)),
+          checked: ref.read(modoLuvaProvider),
+          child: const Text('Modo luva'),
+        ),
         PopupMenuItem(value: () => sessao.bloquear(), child: const Text('Bloquear')),
         PopupMenuItem(value: () => sessao.sair(), child: const Text('Sair da conta')),
       ],

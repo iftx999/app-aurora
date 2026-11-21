@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../app/tema.dart';
 import '../../dados/modelos/dia.dart';
+import '../comum/botao_de_acao.dart';
 
 class EscolhaDeMotivo {
   const EscolhaDeMotivo(this.motivoId, this.observacao);
@@ -102,7 +103,7 @@ class _MotivoTelaState extends State<MotivoTela> {
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: FilledButton(onPressed: widget.motivos.isEmpty ? null : _confirmar, child: Text(widget.botao)),
+                child: BotaoDeAcao(aoConfirmar: widget.motivos.isEmpty ? null : _confirmar, rotulo: widget.botao),
               ),
             ],
           ),

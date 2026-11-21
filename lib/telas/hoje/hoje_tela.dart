@@ -88,6 +88,13 @@ class HojeTela extends ConsumerWidget {
             const SizedBox(height: 8),
             const _Fila(),
             const _Coleta(),
+            if (pacote != null && dia.emergenciasNovas.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              _EmergenciaNova(
+                ordens: [for (final id in dia.emergenciasNovas) ?pacote.ordens.where((o) => o.id == id).firstOrNull],
+                aoVer: controle.dispensarEmergencias,
+              ),
+            ],
             if (dia.rotaNova != null) ...[const SizedBox(height: 8), const _NovaOrdem()],
             const SizedBox(height: 12),
             if (pacote == null || pacote.ordens.isEmpty)
@@ -269,6 +276,75 @@ String _pendencias(int acoes, int fotos) {
     if (fotos > 0) fotos == 1 ? '1 foto' : '$fotos fotos',
   ];
   return '${partes.join(' e ')} ${acoes + fotos == 1 ? 'pendente' : 'pendentes'}';
+}
+
+/// ADR 0051: OS emergencial que entrou durante a jornada (o celular já tocou e vibrou).
+class _EmergenciaNova extends StatelessWidget {
+  const _EmergenciaNova({required this.ordens, required this.aoVer});
+
+  final List<OrdemDoDia> ordens;
+  final VoidCallback aoVer;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.cores;
+    if (ordens.isEmpty) return const SizedBox.shrink();
+    return Semantics(
+      liveRegion: true,
+      child: Card(
+        margin: EdgeInsets.zero,
+        color: c.superficie,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(color: c.perigo, width: 2),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.emergency_rounded, color: c.perigo),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      ordens.length == 1 ? 'OS emergencial nova' : '${ordens.length} OS emergenciais novas',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              for (final o in ordens)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text('${o.servicoNome} · ${o.endereco}', style: TextStyle(color: c.textoSecundario)),
+                ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(onPressed: aoVer, child: const Text('Ok, vi')),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: () {
+                        aoVer();
+                        abrirOrdem(context, ordens.first);
+                      },
+                      child: const Text('Ver OS'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 /// J7 (ADR 0050): a nova ordem publicada espera o agente conferir; até lá, a lista segue a ordem anterior.
