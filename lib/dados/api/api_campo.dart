@@ -114,6 +114,22 @@ class ApiCampo {
     };
   }
 
+  /// "Estou chegando" (ADR 0052): SMS ao morador. Devolve a situação: ENVIADO, REGISTRADO (sem provedor de SMS na
+  /// empresa) ou FALHOU (tentar de novo, com outro [id]).
+  Future<String> avisarChegada(
+    String osId, {
+    required String id,
+    required int minutos,
+    required DateTime ocorridoEm,
+  }) async {
+    final r = await _cliente.post('/api/v1/campo/ordens/$osId/aviso-de-chegada', {
+      'id': id,
+      'minutos': minutos,
+      'ocorridoEm': ocorridoEm.toUtc().toIso8601String(),
+    });
+    return r['situacao'] as String;
+  }
+
   /// ADR 0050: o agente conferiu e confirmou a nova ordem das OS (repetir não muda a primeira confirmação).
   Future<void> confirmarRota(String roteirizacaoId, DateTime confirmadaEm) => _cliente.postSemResposta(
     '/api/v1/campo/rota/confirmacao',

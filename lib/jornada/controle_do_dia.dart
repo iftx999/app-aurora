@@ -156,6 +156,9 @@ class ControleDoDia extends Notifier<EstadoDoDia> {
   /// Id da notificação da OS emergencial nova (ADR 0051).
   static const avisoDeEmergencial = 7303;
 
+  /// Avisos de chegada feitos nesta sessão (o pacote só traz quando a OS muda).
+  final _avisosDeChegada = <String, DateTime>{};
+
   /// ETag da última rota do servidor que o celular tem (a valendo ou a que espera confirmação).
   String? _etagDaRota;
 
@@ -463,6 +466,30 @@ class ControleDoDia extends Notifier<EstadoDoDia> {
 
   void dispensarErro() => state = state.copiar(erro: () => null, abrirAjustes: false);
 
+  /// "Estou chegando" (ADR 0052): SMS ao morador de que a equipe chega em cerca de [minutos]. Só com sinal (um aviso
+  /// atrasado não serve); devolve o texto para a tela.
+  Future<String> avisarChegada(String osId, int minutos) async {
+    try {
+      final situacao = await ref
+          .read(apiCampoProvider)
+          .avisarChegada(osId, id: const Uuid().v4(), minutos: minutos, ocorridoEm: _agora());
+      if (situacao == 'FALHOU') return 'Não deu para enviar o aviso agora. Tente de novo em instantes.';
+      _avisosDeChegada[osId] = _agora();
+      await _mostrar();
+      return situacao == 'ENVIADO'
+          ? 'Morador avisado: chegada em cerca de $minutos min.'
+          : 'Aviso registrado. O envio de SMS ainda não está ligado na sua empresa.';
+    } on SemConexao {
+      return 'Sem sinal: o aviso não foi enviado. Tente quando houver sinal.';
+    } on ErroDaApi catch (e) {
+      if (e.celularRevogado) {
+        await ref.read(sessaoProvider.notifier).sessao.revogar();
+        return e.mensagem;
+      }
+      return e.mensagem;
+    }
+  }
+
   /// O agente viu o alerta da emergencial na tela.
   void dispensarEmergencias() => state = state.copiar(emergenciasNovas: const []);
 
@@ -526,7 +553,7 @@ class ControleDoDia extends Notifier<EstadoDoDia> {
                   (e.respondidoEm?.isAfter(baixado) ?? true)),
         )
         .map((e) => (osId: e.evento.osId, destino: e.evento.acao.destino));
-    final comAcoes = pacote.comAcoes(acoes);
+    final comAcoes = pacote.comAcoes(acoes).comAvisos(_avisosDeChegada);
     // Nova ordem ainda não confirmada: a lista segue a rota que vale no celular.
     final valendo = state.rota;
     state = state.copiar(

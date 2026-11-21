@@ -89,29 +89,48 @@ class Jornada {
 
 /// OS do pacote, com o que o app mostra e usa na execução.
 class OrdemDoDia {
-  const OrdemDoDia(this.json, {required this.servicoVersaoId, this.ultimaSequencia = 0});
+  const OrdemDoDia(
+    this.json, {
+    required this.servicoVersaoId,
+    this.ultimaSequencia = 0,
+    this.avisoDeChegada = false,
+    this.avisadoEm,
+  });
 
   factory OrdemDoDia.deJson(Map<String, dynamic> j) => OrdemDoDia(
     j['ordem'] as Map<String, dynamic>,
     servicoVersaoId: j['servicoVersaoId'] as String,
     ultimaSequencia: (j['ultimaSequencia'] as num?)?.toInt() ?? 0,
+    avisoDeChegada: j['avisoDeChegada'] as bool? ?? false,
+    avisadoEm: j['avisadoEm'] == null ? null : DateTime.parse(j['avisadoEm'] as String),
   );
 
   final Map<String, dynamic> json;
+
+  /// O imóvel tem celular para o "Estou chegando" (ADR 0052); o número nunca vem para o app.
+  final bool avisoDeChegada;
+
+  /// Quando o morador foi avisado, se já foi.
+  final DateTime? avisadoEm;
   final String servicoVersaoId;
 
   /// Último evento do campo que o servidor já processou nesta OS.
   final int ultimaSequencia;
 
   /// A mesma OS com a situação que o celular já registrou e o servidor ainda não mostrou.
-  OrdemDoDia comSequencia(int? sequencia) => OrdemDoDia(
-    {...json, 'sequenciaRota': sequencia},
+  OrdemDoDia comSequencia(int? sequencia) => _com({...json, 'sequenciaRota': sequencia});
+
+  OrdemDoDia comStatus(StatusOrdem novo) => _com({...json, 'status': novo.codigo});
+
+  OrdemDoDia comAviso(DateTime avisado) => _com(json, avisado: avisado);
+
+  OrdemDoDia _com(Map<String, dynamic> novo, {DateTime? avisado}) => OrdemDoDia(
+    novo,
     servicoVersaoId: servicoVersaoId,
     ultimaSequencia: ultimaSequencia,
+    avisoDeChegada: avisoDeChegada,
+    avisadoEm: avisado ?? avisadoEm,
   );
-
-  OrdemDoDia comStatus(StatusOrdem novo) =>
-      OrdemDoDia({...json, 'status': novo.codigo}, servicoVersaoId: servicoVersaoId, ultimaSequencia: ultimaSequencia);
 
   String get id => json['id'] as String;
   int get numero => (json['numero'] as num).toInt();
@@ -205,6 +224,11 @@ class PacoteDoDia {
     }
     return PacoteDoDia._(json, [for (final o in ordens) porId[o.id]!]);
   }
+
+  /// Avisos de chegada feitos pelo celular que o pacote ainda não traz (ADR 0052).
+  PacoteDoDia comAvisos(Map<String, DateTime> avisos) => avisos.isEmpty
+      ? this
+      : PacoteDoDia._(json, [for (final o in ordens) avisos[o.id] == null ? o : o.comAviso(avisos[o.id]!)]);
 
   /// O pacote na ordem de [ids] (a rota confirmada pelo agente enquanto a nova espera confirmação, ADR 0050): elas
   /// recebem a posição 1, 2, …; as demais perdem a posição e vão para o fim, por prioridade e prazo.

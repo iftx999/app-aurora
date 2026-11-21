@@ -26,6 +26,7 @@ Map<String, dynamic> ordemJson(
   String numero = '410',
   DateTime? atualizada,
   int ultimaSequencia = 0,
+  bool avisoDeChegada = false,
 }) => {
   'ordem': {
     'id': id,
@@ -46,6 +47,7 @@ Map<String, dynamic> ordemJson(
   },
   'servicoVersaoId': 'v1',
   'ultimaSequencia': ultimaSequencia,
+  'avisoDeChegada': avisoDeChegada,
 };
 
 EventoDeCampo eventoDeTeste(String id, {String os = 'a', int sequencia = 1, AcaoDeCampo acao = AcaoDeCampo.iniciar}) =>
@@ -174,6 +176,24 @@ class ApiFalsa extends ApiCampo {
     final etag = r == null ? null : '"${r['roteirizacaoId']}"';
     if (etag != null && etag == conhecida) return (mudou: false, json: null, etag: conhecida);
     return (mudou: true, json: r, etag: etag);
+  }
+
+  /// Avisos de chegada recebidos; [situacaoDoAviso] é a resposta e [erroNoAviso] é lançado no lugar dela.
+  final avisosDeChegada = <({String os, int minutos})>[];
+  String situacaoDoAviso = 'ENVIADO';
+  Object? erroNoAviso;
+
+  @override
+  Future<String> avisarChegada(
+    String osId, {
+    required String id,
+    required int minutos,
+    required DateTime ocorridoEm,
+  }) async {
+    _rede();
+    if (erroNoAviso case final e?) throw e;
+    avisosDeChegada.add((os: osId, minutos: minutos));
+    return situacaoDoAviso;
   }
 
   /// Confirmações recebidas em `POST /rota/confirmacao`; [erroNaConfirmacao] é lançado no lugar da resposta.

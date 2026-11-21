@@ -82,6 +82,21 @@ class OrdemTela extends ConsumerWidget {
           _Registro(osId: osId),
           const SizedBox(height: 16),
           ..._acoes(context, ref, pacote, ordem),
+          if (ordem.status == StatusOrdem.programada && ordem.avisoDeChegada) ...[
+            const SizedBox(height: 10),
+            if (ordem.avisadoEm case final avisado?)
+              Text(
+                'Morador avisado às ${hora(avisado.toLocal())}.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: c.textoSecundario),
+              )
+            else
+              OutlinedButton.icon(
+                onPressed: () => _avisarChegada(context, ref, ordem),
+                icon: const Icon(Icons.sms_rounded),
+                label: const Text('Estou chegando'),
+              ),
+          ],
           const SizedBox(height: 10),
           OutlinedButton.icon(
             onPressed: () => navegar(context, ordem),
@@ -91,6 +106,37 @@ class OrdemTela extends ConsumerWidget {
         ],
       ),
     );
+  }
+
+  /// ADR 0052: escolhe em quanto tempo chega e pede o SMS ao morador (o número fica no servidor).
+  Future<void> _avisarChegada(BuildContext context, WidgetRef ref, OrdemDoDia ordem) async {
+    final minutos = await showDialog<int>(
+      context: context,
+      builder: (contexto) => SimpleDialog(
+        title: const Text('Avisar o morador'),
+        contentPadding: const EdgeInsets.fromLTRB(0, 12, 0, 16),
+        children: [
+          const Padding(
+            padding: EdgeInsets.fromLTRB(24, 0, 24, 8),
+            child: Text('O morador recebe um SMS de que a equipe está a caminho. Você chega em cerca de:'),
+          ),
+          for (final m in const [5, 10, 15, 20, 30])
+            SimpleDialogOption(
+              onPressed: () => Navigator.of(contexto).pop(m),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(minHeight: 48),
+                child: Align(alignment: Alignment.centerLeft, child: Text('$m minutos')),
+              ),
+            ),
+        ],
+      ),
+    );
+    if (minutos == null || !context.mounted) return;
+    final mensagem = await ref.read(controleDoDiaProvider.notifier).avisarChegada(ordem.id, minutos);
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(mensagem)));
   }
 
   List<Widget> _acoes(BuildContext context, WidgetRef ref, PacoteDoDia pacote, OrdemDoDia ordem) {
