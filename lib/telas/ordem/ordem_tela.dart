@@ -11,7 +11,7 @@ import '../../sincronizacao/controle_da_fila.dart';
 import '../comum/botao_de_acao.dart';
 import '../comum/navegar.dart';
 import 'encerrar_tela.dart';
-import 'foto_da_fase_tela.dart';
+import 'fase_da_os_tela.dart';
 import 'motivo_tela.dart';
 
 void abrirOrdem(BuildContext context, OrdemDoDia ordem) =>
@@ -143,7 +143,14 @@ class OrdemTela extends ConsumerWidget {
   List<Widget> _acoes(BuildContext context, WidgetRef ref, PacoteDoDia pacote, OrdemDoDia ordem) {
     final controle = ref.read(controleDoDiaProvider.notifier);
     final pode = {for (final a in AcaoDeCampo.values) a: a.destino(ordem.status) != null};
-    Future<void> comMotivo(AcaoDeCampo acao, String tipo, String titulo, String ajuda, FotoDoMotivo foto) async {
+    Future<void> comMotivo(
+      AcaoDeCampo acao,
+      String tipo,
+      String titulo,
+      String verbo,
+      String ajuda,
+      FotoDoMotivo foto,
+    ) async {
       final escolha = await Navigator.of(context).push<EscolhaDeMotivo>(
         MaterialPageRoute(
           builder: (_) => MotivoTela(
@@ -151,7 +158,10 @@ class OrdemTela extends ConsumerWidget {
             ajuda: ajuda,
             botao: titulo,
             motivos: pacote.motivosPara(tipo, ordem),
+            osId: ordem.id,
+            verbo: verbo,
             foto: ordem.exigeFoto(acao) ? foto : null,
+            observacaoObrigatoria: ordem.exigeObservacao(acao),
           ),
         ),
       );
@@ -166,15 +176,16 @@ class OrdemTela extends ConsumerWidget {
       }
     }
 
-    // ADR 0053: com foto exigida, iniciar e retomar passam pela câmera (a confirmação fica lá).
-    Widget comecar(AcaoDeCampo acao, String rotulo) => ordem.exigeFoto(acao)
+    // ADR 0053: com foto ou observação exigida, iniciar e retomar passam por uma tela própria (a confirmação
+    // fica lá).
+    Widget comecar(AcaoDeCampo acao, String rotulo) => ordem.exigeFoto(acao) || ordem.exigeObservacao(acao)
         ? FilledButton.icon(
             onPressed: () => Navigator.of(context).push(
               MaterialPageRoute<void>(
-                builder: (_) => FotoDaFaseTela(osId: ordem.id, acao: acao),
+                builder: (_) => FaseDaOsTela(osId: ordem.id, acao: acao),
               ),
             ),
-            icon: const Icon(Icons.photo_camera_rounded),
+            icon: Icon(ordem.exigeFoto(acao) ? Icons.photo_camera_rounded : Icons.edit_note_rounded),
             label: Text(rotulo),
           )
         : BotaoDeAcao(
@@ -203,12 +214,11 @@ class OrdemTela extends ConsumerWidget {
             AcaoDeCampo.paralisar,
             'PARALISACAO',
             'Paralisar',
+            'paralisar',
             'O tempo parado fica separado do tempo de execução.',
-            FotoDoMotivo(
-              osId: ordem.id,
+            const FotoDoMotivo(
               titulo: 'Foto do motivo da paralisação',
               ajuda: 'Mostre o que impede o trabalho (chuva, falta de material, trânsito).',
-              verbo: 'paralisar',
             ),
           ),
           child: const Text('Paralisar'),
@@ -221,12 +231,11 @@ class OrdemTela extends ConsumerWidget {
             AcaoDeCampo.devolver,
             'DEVOLUCAO',
             'Devolver',
+            'devolver',
             'A OS volta para o programador decidir (reprogramar ou cancelar).',
-            FotoDoMotivo(
-              osId: ordem.id,
+            const FotoDoMotivo(
               titulo: 'Foto que comprova a devolução',
               ajuda: 'Mostre por que a OS não pôde ser feita (portão fechado, local sem acesso).',
-              verbo: 'devolver',
             ),
           ),
           child: const Text('Devolver'),

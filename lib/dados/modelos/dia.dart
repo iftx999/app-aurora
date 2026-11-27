@@ -98,6 +98,7 @@ class OrdemDoDia {
     this.avisoDeChegada = false,
     this.avisadoEm,
     this.fasesComFoto = const {},
+    this.fasesComObservacao = const {},
   });
 
   factory OrdemDoDia.deJson(Map<String, dynamic> j) => OrdemDoDia(
@@ -108,6 +109,7 @@ class OrdemDoDia {
     avisadoEm: j['avisadoEm'] == null ? null : DateTime.parse(j['avisadoEm'] as String),
     // Servidor anterior à ADR 0053 não manda: nenhuma fase exige foto.
     fasesComFoto: {for (final f in (j['fasesComFoto'] as List?) ?? const []) AcaoDeCampo.de(f as String)},
+    fasesComObservacao: {for (final f in (j['fasesComObservacao'] as List?) ?? const []) AcaoDeCampo.de(f as String)},
   );
 
   final Map<String, dynamic> json;
@@ -127,6 +129,11 @@ class OrdemDoDia {
 
   bool exigeFoto(AcaoDeCampo acao) => fasesComFoto.contains(acao);
 
+  /// ADR 0053: ações em que o serviço exige observação.
+  final Set<AcaoDeCampo> fasesComObservacao;
+
+  bool exigeObservacao(AcaoDeCampo acao) => fasesComObservacao.contains(acao);
+
   /// A mesma OS com a situação que o celular já registrou e o servidor ainda não mostrou.
   OrdemDoDia comSequencia(int? sequencia) => _com({...json, 'sequenciaRota': sequencia});
 
@@ -141,6 +148,7 @@ class OrdemDoDia {
     avisoDeChegada: avisoDeChegada,
     avisadoEm: avisado ?? avisadoEm,
     fasesComFoto: fasesComFoto,
+    fasesComObservacao: fasesComObservacao,
   );
 
   String get id => json['id'] as String;

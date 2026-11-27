@@ -19,18 +19,14 @@ class EscolhaDeMotivo {
 
 /// A foto pedida junto do motivo (ADR 0053).
 class FotoDoMotivo {
-  const FotoDoMotivo({required this.osId, required this.titulo, required this.ajuda, required this.verbo});
+  const FotoDoMotivo({required this.titulo, required this.ajuda});
 
-  final String osId;
   final String titulo;
   final String ajuda;
-
-  /// "paralisar", "devolver".
-  final String verbo;
 }
 
 /// Motivo de paralisar ou devolver (RN-22; protótipo `Motivo`): "Outro" e afins exigem observação; com [foto], exige
-/// ao menos uma foto (ADR 0053).
+/// ao menos uma foto e, com [observacaoObrigatoria], a observação em qualquer motivo (ADR 0053).
 class MotivoTela extends ConsumerStatefulWidget {
   const MotivoTela({
     super.key,
@@ -38,14 +34,22 @@ class MotivoTela extends ConsumerStatefulWidget {
     required this.ajuda,
     required this.botao,
     required this.motivos,
+    required this.osId,
+    required this.verbo,
     this.foto,
+    this.observacaoObrigatoria = false,
   });
 
+  final String osId;
+
+  /// "paralisar", "devolver" (nas mensagens).
+  final String verbo;
   final String titulo;
   final String ajuda;
   final String botao;
   final List<MotivoDoCampo> motivos;
   final FotoDoMotivo? foto;
+  final bool observacaoObrigatoria;
 
   static const maximoDeObservacao = 500;
 
@@ -83,19 +87,22 @@ class _MotivoTelaState extends ConsumerState<MotivoTela> {
     final obs = _observacao.text.trim();
     if (m == null) return setState(() => _erro = 'Escolha o motivo.');
     if (m.exigeObservacao && obs.isEmpty) return setState(() => _erro = 'Escreva a observação para "${m.nome}".');
+    if (widget.observacaoObrigatoria && obs.isEmpty) {
+      return setState(() => _erro = 'Escreva a observação para ${widget.verbo} a OS.');
+    }
     final foto = widget.foto;
     if (foto != null && _fotos.lista.isEmpty) {
-      return setState(() => _erro = 'Tire pelo menos uma foto para ${foto.verbo} a OS.');
+      return setState(() => _erro = 'Tire pelo menos uma foto para ${widget.verbo} a OS.');
     }
     Navigator.of(context).pop(
-      EscolhaDeMotivo(m.id, obs.isEmpty ? null : obs, fotos: foto == null ? const [] : _fotos.paraAFila(foto.osId)),
+      EscolhaDeMotivo(m.id, obs.isEmpty ? null : obs, fotos: foto == null ? const [] : _fotos.paraAFila(widget.osId)),
     );
   }
 
   @override
   Widget build(BuildContext context) {
     final c = context.cores;
-    final exige = _escolhido?.exigeObservacao ?? false;
+    final exige = widget.observacaoObrigatoria || (_escolhido?.exigeObservacao ?? false);
     return Scaffold(
       appBar: AppBar(title: Text(widget.titulo)),
       body: ListView(
@@ -130,7 +137,11 @@ class _MotivoTelaState extends ConsumerState<MotivoTela> {
             maxLength: MotivoTela.maximoDeObservacao,
             minLines: 2,
             maxLines: 5,
-            decoration: InputDecoration(labelText: exige ? 'Observação (obrigatória)' : 'Observação (opcional)'),
+            decoration: InputDecoration(
+              labelText: exige ? 'Observação (obrigatória)' : 'Observação (opcional)',
+              helperText: 'Descreva o local e o serviço; não escreva dados do morador.',
+              helperMaxLines: 2,
+            ),
           ),
           if (widget.foto case final f?) ...[
             const SizedBox(height: 8),

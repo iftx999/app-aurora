@@ -14,13 +14,13 @@ import '../apoio.dart';
 
 const todas = ['INICIAR', 'PARALISAR', 'RETOMAR', 'DEVOLVER'];
 
-/// ADR 0053: foto ao iniciar, paralisar, retomar e devolver, quando o serviço exige.
+/// ADR 0053: foto e observação ao iniciar, paralisar, retomar e devolver, quando o serviço exige.
 void main() {
   late ApiFalsa api;
   late ArmazemEmMemoria armazem;
   late ArquivosEmMemoria arquivos;
 
-  void montar({String status = 'PROGRAMADA', List<String>? fases = todas}) {
+  void montar({String status = 'PROGRAMADA', List<String>? fases = todas, List<String>? observacao = todas}) {
     api = ApiFalsa(equipes: equipesDeTeste);
     final pacote = pacoteJson(
       ordens: [
@@ -30,6 +30,7 @@ void main() {
           status: status,
           ultimaSequencia: status == 'PROGRAMADA' ? 0 : 1,
           fasesComFoto: fases,
+          fasesComObservacao: observacao,
         ),
       ],
     );
@@ -74,6 +75,9 @@ void main() {
     expect(com.exigeFoto(AcaoDeCampo.paralisar), isFalse);
     expect(com.comStatus(StatusOrdem.emExecucao).exigeFoto(AcaoDeCampo.devolver), isTrue);
     expect(OrdemDoDia.deJson(ordemJson('a')).fasesComFoto, isEmpty);
+    final obs = OrdemDoDia.deJson(ordemJson('a', fasesComObservacao: const ['RETOMAR']));
+    expect((obs.exigeObservacao(AcaoDeCampo.retomar), obs.exigeObservacao(AcaoDeCampo.iniciar)), (true, false));
+    expect(OrdemDoDia.deJson(ordemJson('a')).fasesComObservacao, isEmpty);
   });
 
   test('o evento leva os ids das fotos e volta igual da fila', () {
@@ -90,7 +94,7 @@ void main() {
     expect(eventoDeTeste('e2').paraJson().containsKey('fotos'), isFalse);
   });
 
-  testWidgets('iniciar com foto exigida: pede a foto antes e manda junto', (tester) async {
+  testWidgets('iniciar com foto e observação exigidas: pede as duas antes e manda junto', (tester) async {
     montar();
     await abrirOs(tester);
     await tocar(tester, find.widgetWithText(FilledButton, 'Iniciar OS'));
@@ -104,10 +108,17 @@ void main() {
     expect(find.text('1 de até 10'), findsOneWidget);
     expect(find.text('Tire pelo menos uma foto para iniciar a OS.'), findsNothing);
     await tocar(tester, find.widgetWithText(FilledButton, 'Iniciar OS'));
+    expect(find.text('Escreva a observação para iniciar a OS.'), findsOneWidget);
+    expect(armazem.fila, isEmpty);
+    await tester.enterText(find.byType(TextField), '  Calçada quebrada na frente  ');
+    await tester.pump();
+    expect(find.text('Escreva a observação para iniciar a OS.'), findsNothing);
+    await tocar(tester, find.widgetWithText(FilledButton, 'Iniciar OS'));
 
     final e = armazem.fila.single.evento;
     final foto = armazem.anexos.single;
     expect(e.acao, AcaoDeCampo.iniciar);
+    expect(e.observacao, 'Calçada quebrada na frente');
     expect(e.fotos, [foto.id]);
     expect((foto.osId, foto.parametro), ('a', null));
     expect(arquivos.arquivos.keys, [foto.caminho]);
@@ -128,12 +139,16 @@ void main() {
     expect(find.text('Programada'), findsOneWidget);
   });
 
-  testWidgets('paralisar com foto exigida: o motivo sozinho não basta', (tester) async {
+  testWidgets('paralisar com foto e observação exigidas: o motivo sozinho não basta', (tester) async {
     montar(status: 'EM_EXECUCAO');
     await abrirOs(tester);
     await tocar(tester, find.widgetWithText(OutlinedButton, 'Paralisar'));
+    expect(find.text('Observação (obrigatória)'), findsOneWidget);
     await tester.tap(find.text('Chuva forte'));
     await tester.pump();
+    await tocar(tester, find.widgetWithText(FilledButton, 'Paralisar'));
+    expect(find.text('Escreva a observação para paralisar a OS.'), findsOneWidget);
+    await tester.enterText(find.byType(TextField), 'Vala alagada');
     await tocar(tester, find.widgetWithText(FilledButton, 'Paralisar'));
     expect(find.text('Tire pelo menos uma foto para paralisar a OS.'), findsOneWidget);
 
@@ -143,7 +158,7 @@ void main() {
     await tocar(tester, find.widgetWithText(FilledButton, 'Paralisar'));
 
     final e = armazem.fila.single.evento;
-    expect(e.acao, AcaoDeCampo.paralisar);
+    expect((e.acao, e.motivoId, e.observacao), (AcaoDeCampo.paralisar, 'm1', 'Vala alagada'));
     expect(e.fotos, hasLength(2));
     expect(armazem.anexos.map((f) => f.id), e.fotos);
     expect(find.text('Paralisada'), findsOneWidget);
@@ -157,22 +172,38 @@ void main() {
     await tester.tap(find.byType(RadioListTile<String>).first);
     await tester.pump();
     await tocar(tester, find.text('Câmera'));
+    await tester.enterText(find.byType(TextField), 'Portão trancado, ninguém atendeu');
     await tocar(tester, find.widgetWithText(FilledButton, 'Devolver'));
     final e = armazem.fila.single.evento;
-    expect((e.acao, e.fotos.length), (AcaoDeCampo.devolver, 1));
+    expect((e.acao, e.fotos.length, e.observacao), (AcaoDeCampo.devolver, 1, 'Portão trancado, ninguém atendeu'));
   });
 
-  testWidgets('serviço sem foto nas fases: iniciar e paralisar como antes', (tester) async {
+  testWidgets('só a observação exigida: a tela da fase não abre a câmera', (tester) async {
     montar(fases: const []);
+    await abrirOs(tester);
+    await tocar(tester, find.widgetWithText(FilledButton, 'Iniciar OS'));
+    expect(find.text('Câmera'), findsNothing);
+    await tocar(tester, find.widgetWithText(FilledButton, 'Iniciar OS'));
+    expect(find.text('Escreva a observação para iniciar a OS.'), findsOneWidget);
+    await tester.enterText(find.byType(TextField), 'Tudo em ordem');
+    await tocar(tester, find.widgetWithText(FilledButton, 'Iniciar OS'));
+    final e = armazem.fila.single.evento;
+    expect(e.observacao, 'Tudo em ordem');
+    expect(e.fotos, isEmpty);
+  });
+
+  testWidgets('serviço sem exigência nas fases: iniciar e paralisar como antes', (tester) async {
+    montar(fases: const [], observacao: const []);
     await abrirOs(tester);
     await tocar(tester, find.widgetWithText(FilledButton, 'Iniciar OS'));
     expect(armazem.fila.single.evento.acao, AcaoDeCampo.iniciar);
     expect(armazem.fila.single.evento.fotos, isEmpty);
     await tocar(tester, find.widgetWithText(OutlinedButton, 'Paralisar'));
     expect(find.text('Câmera'), findsNothing);
+    expect(find.text('Observação (opcional)'), findsOneWidget);
   });
 
-  testWidgets('a tela da foto passa nas diretrizes de acessibilidade', (tester) async {
+  testWidgets('a tela da fase passa nas diretrizes de acessibilidade', (tester) async {
     final semantica = tester.ensureSemantics();
     montar();
     await abrirOs(tester);
