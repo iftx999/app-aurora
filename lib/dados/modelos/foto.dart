@@ -1,5 +1,6 @@
-/// Foto de um parâmetro do encerramento (10.9.3): tirada e reduzida no celular, guardada na pasta privada do app e
-/// enviada em partes depois dos eventos; o evento de encerramento a referencia pelo [id].
+/// Foto da OS (10.9.3): de um parâmetro do encerramento ou de uma fase (iniciar, paralisar, retomar, devolver; ADR
+/// 0053). Tirada e reduzida no celular, guardada na pasta privada do app e enviada em partes depois dos eventos; o
+/// evento a referencia pelo [id].
 library;
 
 enum SituacaoDaFoto { pendente, enviada, recusada }
@@ -8,7 +9,7 @@ class FotoDaOs {
   const FotoDaOs({
     required this.id,
     required this.osId,
-    required this.parametro,
+    this.parametro,
     required this.caminho,
     required this.tipoMidia,
     required this.tamanho,
@@ -22,8 +23,8 @@ class FotoDaOs {
   final String id;
   final String osId;
 
-  /// Chave do parâmetro de foto.
-  final String parametro;
+  /// Chave do parâmetro de foto do encerramento; nula na foto de uma fase.
+  final String? parametro;
 
   /// Arquivo na pasta privada do app.
   final String caminho;

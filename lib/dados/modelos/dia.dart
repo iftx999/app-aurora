@@ -2,6 +2,8 @@
 /// armazenamento local e para aplicar as diferenças do pacote (10.9.2).
 library;
 
+import 'evento.dart';
+
 enum StatusOrdem {
   planejada('PLANEJADA'),
   programada('PROGRAMADA'),
@@ -95,6 +97,7 @@ class OrdemDoDia {
     this.ultimaSequencia = 0,
     this.avisoDeChegada = false,
     this.avisadoEm,
+    this.fasesComFoto = const {},
   });
 
   factory OrdemDoDia.deJson(Map<String, dynamic> j) => OrdemDoDia(
@@ -103,6 +106,8 @@ class OrdemDoDia {
     ultimaSequencia: (j['ultimaSequencia'] as num?)?.toInt() ?? 0,
     avisoDeChegada: j['avisoDeChegada'] as bool? ?? false,
     avisadoEm: j['avisadoEm'] == null ? null : DateTime.parse(j['avisadoEm'] as String),
+    // Servidor anterior à ADR 0053 não manda: nenhuma fase exige foto.
+    fasesComFoto: {for (final f in (j['fasesComFoto'] as List?) ?? const []) AcaoDeCampo.de(f as String)},
   );
 
   final Map<String, dynamic> json;
@@ -117,6 +122,11 @@ class OrdemDoDia {
   /// Último evento do campo que o servidor já processou nesta OS.
   final int ultimaSequencia;
 
+  /// ADR 0053: ações em que o serviço exige foto (iniciar, paralisar, retomar, devolver).
+  final Set<AcaoDeCampo> fasesComFoto;
+
+  bool exigeFoto(AcaoDeCampo acao) => fasesComFoto.contains(acao);
+
   /// A mesma OS com a situação que o celular já registrou e o servidor ainda não mostrou.
   OrdemDoDia comSequencia(int? sequencia) => _com({...json, 'sequenciaRota': sequencia});
 
@@ -130,6 +140,7 @@ class OrdemDoDia {
     ultimaSequencia: ultimaSequencia,
     avisoDeChegada: avisoDeChegada,
     avisadoEm: avisado ?? avisadoEm,
+    fasesComFoto: fasesComFoto,
   );
 
   String get id => json['id'] as String;

@@ -11,6 +11,7 @@ import '../../sincronizacao/controle_da_fila.dart';
 import '../comum/botao_de_acao.dart';
 import '../comum/navegar.dart';
 import 'encerrar_tela.dart';
+import 'foto_da_fase_tela.dart';
 import 'motivo_tela.dart';
 
 void abrirOrdem(BuildContext context, OrdemDoDia ordem) =>
@@ -142,7 +143,7 @@ class OrdemTela extends ConsumerWidget {
   List<Widget> _acoes(BuildContext context, WidgetRef ref, PacoteDoDia pacote, OrdemDoDia ordem) {
     final controle = ref.read(controleDoDiaProvider.notifier);
     final pode = {for (final a in AcaoDeCampo.values) a: a.destino(ordem.status) != null};
-    Future<void> comMotivo(AcaoDeCampo acao, String tipo, String titulo, String ajuda) async {
+    Future<void> comMotivo(AcaoDeCampo acao, String tipo, String titulo, String ajuda, FotoDoMotivo foto) async {
       final escolha = await Navigator.of(context).push<EscolhaDeMotivo>(
         MaterialPageRoute(
           builder: (_) => MotivoTela(
@@ -150,31 +151,47 @@ class OrdemTela extends ConsumerWidget {
             ajuda: ajuda,
             botao: titulo,
             motivos: pacote.motivosPara(tipo, ordem),
+            foto: ordem.exigeFoto(acao) ? foto : null,
           ),
         ),
       );
       if (escolha != null) {
-        await controle.registrar(ordem.id, acao, motivoId: escolha.motivoId, observacao: escolha.observacao);
+        await controle.registrar(
+          ordem.id,
+          acao,
+          motivoId: escolha.motivoId,
+          observacao: escolha.observacao,
+          fotos: escolha.fotos,
+        );
       }
     }
 
+    // ADR 0053: com foto exigida, iniciar e retomar passam pela câmera (a confirmação fica lá).
+    Widget comecar(AcaoDeCampo acao, String rotulo) => ordem.exigeFoto(acao)
+        ? FilledButton.icon(
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => FotoDaFaseTela(osId: ordem.id, acao: acao),
+              ),
+            ),
+            icon: const Icon(Icons.photo_camera_rounded),
+            label: Text(rotulo),
+          )
+        : BotaoDeAcao(
+            aoConfirmar: () => controle.registrar(ordem.id, acao),
+            icone: Icons.play_arrow_rounded,
+            rotulo: rotulo,
+          );
+
     final principal = switch (ordem.status) {
-      StatusOrdem.programada => BotaoDeAcao(
-        aoConfirmar: () => controle.registrar(ordem.id, AcaoDeCampo.iniciar),
-        icone: Icons.play_arrow_rounded,
-        rotulo: 'Iniciar OS',
-      ),
+      StatusOrdem.programada => comecar(AcaoDeCampo.iniciar, 'Iniciar OS'),
       StatusOrdem.emExecucao => FilledButton.icon(
         onPressed: () =>
             Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => EncerrarTela(osId: ordem.id))),
         icon: const Icon(Icons.task_alt_rounded),
         label: const Text('Encerrar OS'),
       ),
-      StatusOrdem.paralisada => BotaoDeAcao(
-        aoConfirmar: () => controle.registrar(ordem.id, AcaoDeCampo.retomar),
-        icone: Icons.play_arrow_rounded,
-        rotulo: 'Retomar OS',
-      ),
+      StatusOrdem.paralisada => comecar(AcaoDeCampo.retomar, 'Retomar OS'),
       _ => null,
     };
     return [
@@ -187,6 +204,12 @@ class OrdemTela extends ConsumerWidget {
             'PARALISACAO',
             'Paralisar',
             'O tempo parado fica separado do tempo de execução.',
+            FotoDoMotivo(
+              osId: ordem.id,
+              titulo: 'Foto do motivo da paralisação',
+              ajuda: 'Mostre o que impede o trabalho (chuva, falta de material, trânsito).',
+              verbo: 'paralisar',
+            ),
           ),
           child: const Text('Paralisar'),
         ),
@@ -199,6 +222,12 @@ class OrdemTela extends ConsumerWidget {
             'DEVOLUCAO',
             'Devolver',
             'A OS volta para o programador decidir (reprogramar ou cancelar).',
+            FotoDoMotivo(
+              osId: ordem.id,
+              titulo: 'Foto que comprova a devolução',
+              ajuda: 'Mostre por que a OS não pôde ser feita (portão fechado, local sem acesso).',
+              verbo: 'devolver',
+            ),
           ),
           child: const Text('Devolver'),
         ),
@@ -264,7 +293,7 @@ class _RegistroState extends ConsumerState<_Registro> {
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 2),
             child: Text(
-              '${e.evento.acao.rotulo} ${hora(e.evento.ocorridoEm)} · ${_envio(e)}',
+              '${e.evento.acao.rotulo} ${hora(e.evento.ocorridoEm)}${_fotos(e.evento.fotos.length)} · ${_envio(e)}',
               style: TextStyle(color: e.situacao.avisar ? c.perigo : c.texto),
             ),
           ),
@@ -272,6 +301,12 @@ class _RegistroState extends ConsumerState<_Registro> {
       ],
     );
   }
+
+  static String _fotos(int n) => switch (n) {
+    0 => '',
+    1 => ' · 1 foto',
+    _ => ' · $n fotos',
+  };
 
   static String _envio(EventoNaFila e) => switch (e.situacao) {
     SituacaoDoEnvio.pendente => 'na fila',

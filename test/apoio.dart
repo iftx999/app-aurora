@@ -27,6 +27,7 @@ Map<String, dynamic> ordemJson(
   DateTime? atualizada,
   int ultimaSequencia = 0,
   bool avisoDeChegada = false,
+  List<String>? fasesComFoto,
 }) => {
   'ordem': {
     'id': id,
@@ -48,6 +49,7 @@ Map<String, dynamic> ordemJson(
   'servicoVersaoId': 'v1',
   'ultimaSequencia': ultimaSequencia,
   'avisoDeChegada': avisoDeChegada,
+  'fasesComFoto': ?fasesComFoto,
 };
 
 EventoDeCampo eventoDeTeste(String id, {String os = 'a', int sequencia = 1, AcaoDeCampo acao = AcaoDeCampo.iniciar}) =>

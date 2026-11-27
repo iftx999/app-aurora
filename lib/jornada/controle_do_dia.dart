@@ -415,6 +415,8 @@ class ControleDoDia extends Notifier<EstadoDoDia> {
             valores: valores,
             posicao: posicao?.paraJson().cast<String, dynamic>(),
             versaoPacote: _doServidor?.versao,
+            // No encerramento, as fotos vão nos valores dos parâmetros.
+            fotos: acao == AcaoDeCampo.encerrar ? const [] : [for (final f in fotos) f.id],
           ),
           fotos: fotos,
         );

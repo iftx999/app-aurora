@@ -1,40 +1,79 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/tema.dart';
 import '../../dados/modelos/dia.dart';
+import '../../dados/modelos/foto.dart';
 import '../comum/botao_de_acao.dart';
+import '../comum/fotos_da_acao.dart';
 
 class EscolhaDeMotivo {
-  const EscolhaDeMotivo(this.motivoId, this.observacao);
+  const EscolhaDeMotivo(this.motivoId, this.observacao, {this.fotos = const []});
 
   final String motivoId;
   final String? observacao;
+
+  /// ADR 0053: fotos da paralisação ou da devolução, prontas para a fila.
+  final List<FotoDaOs> fotos;
 }
 
-/// Motivo de paralisar ou devolver (RN-22; protótipo `Motivo`): "Outro" e afins exigem observação.
-class MotivoTela extends StatefulWidget {
-  const MotivoTela({super.key, required this.titulo, required this.ajuda, required this.botao, required this.motivos});
+/// A foto pedida junto do motivo (ADR 0053).
+class FotoDoMotivo {
+  const FotoDoMotivo({required this.osId, required this.titulo, required this.ajuda, required this.verbo});
+
+  final String osId;
+  final String titulo;
+  final String ajuda;
+
+  /// "paralisar", "devolver".
+  final String verbo;
+}
+
+/// Motivo de paralisar ou devolver (RN-22; protótipo `Motivo`): "Outro" e afins exigem observação; com [foto], exige
+/// ao menos uma foto (ADR 0053).
+class MotivoTela extends ConsumerStatefulWidget {
+  const MotivoTela({
+    super.key,
+    required this.titulo,
+    required this.ajuda,
+    required this.botao,
+    required this.motivos,
+    this.foto,
+  });
 
   final String titulo;
   final String ajuda;
   final String botao;
   final List<MotivoDoCampo> motivos;
+  final FotoDoMotivo? foto;
 
   static const maximoDeObservacao = 500;
 
   @override
-  State<MotivoTela> createState() => _MotivoTelaState();
+  ConsumerState<MotivoTela> createState() => _MotivoTelaState();
 }
 
-class _MotivoTelaState extends State<MotivoTela> {
+class _MotivoTelaState extends ConsumerState<MotivoTela> {
   String? _motivo;
   final _observacao = TextEditingController();
+  late final FotosDaAcao _fotos;
   String? _erro;
+
+  @override
+  void initState() {
+    super.initState();
+    _fotos = FotosDaAcao(ref);
+  }
 
   @override
   void dispose() {
     _observacao.dispose();
+    _fotos.descartar();
     super.dispose();
+  }
+
+  Future<void> _tirar() async {
+    if (await _fotos.tirar() && mounted) setState(() => _erro = null);
   }
 
   MotivoDoCampo? get _escolhido => widget.motivos.where((m) => m.id == _motivo).firstOrNull;
@@ -44,7 +83,13 @@ class _MotivoTelaState extends State<MotivoTela> {
     final obs = _observacao.text.trim();
     if (m == null) return setState(() => _erro = 'Escolha o motivo.');
     if (m.exigeObservacao && obs.isEmpty) return setState(() => _erro = 'Escreva a observação para "${m.nome}".');
-    Navigator.of(context).pop(EscolhaDeMotivo(m.id, obs.isEmpty ? null : obs));
+    final foto = widget.foto;
+    if (foto != null && _fotos.lista.isEmpty) {
+      return setState(() => _erro = 'Tire pelo menos uma foto para ${foto.verbo} a OS.');
+    }
+    Navigator.of(context).pop(
+      EscolhaDeMotivo(m.id, obs.isEmpty ? null : obs, fotos: foto == null ? const [] : _fotos.paraAFila(foto.osId)),
+    );
   }
 
   @override
@@ -87,6 +132,16 @@ class _MotivoTelaState extends State<MotivoTela> {
             maxLines: 5,
             decoration: InputDecoration(labelText: exige ? 'Observação (obrigatória)' : 'Observação (opcional)'),
           ),
+          if (widget.foto case final f?) ...[
+            const SizedBox(height: 8),
+            CampoDeFotos(
+              titulo: f.titulo,
+              ajuda: f.ajuda,
+              fotos: _fotos.lista,
+              aoTirar: _tirar,
+              aoRemover: (foto) => setState(() => _fotos.remover(foto)),
+            ),
+          ],
           if (_erro case final e?)
             Semantics(
               liveRegion: true,

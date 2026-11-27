@@ -49,6 +49,7 @@ class EventoDeCampo {
     this.valores,
     this.posicao,
     this.versaoPacote,
+    this.fotos = const [],
   });
 
   factory EventoDeCampo.deJson(Map<String, dynamic> j) => EventoDeCampo(
@@ -64,6 +65,7 @@ class EventoDeCampo {
     valores: j['valores'] as Map<String, dynamic>?,
     posicao: j['posicao'] as Map<String, dynamic>?,
     versaoPacote: (j['versaoPacote'] as num?)?.toInt(),
+    fotos: (j['fotos'] as List?)?.cast<String>() ?? const [],
   );
 
   final String id;
@@ -83,6 +85,9 @@ class EventoDeCampo {
   final Map<String, dynamic>? posicao;
   final int? versaoPacote;
 
+  /// Ids das fotos tiradas na ação (fora do encerramento, cujas fotos vão nos [valores]; ADR 0053).
+  final List<String> fotos;
+
   Map<String, Object?> paraJson() => {
     'id': id,
     'osId': osId,
@@ -96,6 +101,7 @@ class EventoDeCampo {
     'valores': ?valores,
     'posicao': ?posicao,
     'versaoPacote': ?versaoPacote,
+    if (fotos.isNotEmpty) 'fotos': fotos,
   };
 }
 

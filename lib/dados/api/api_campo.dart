@@ -151,7 +151,7 @@ class ApiCampo {
     await _cliente.putBytes(
       '/api/v1/campo/anexos/${foto.id}',
       bytes,
-      parametros: {'os': foto.osId, 'parametro': foto.parametro},
+      parametros: {'os': foto.osId, 'parametro': ?foto.parametro},
       cabecalhos: {
         'Content-Type': foto.tipoMidia,
         'Content-Range': 'bytes $inicio-${inicio + bytes.length - 1}/${foto.tamanho}',

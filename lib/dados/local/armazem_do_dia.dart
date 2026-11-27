@@ -295,7 +295,8 @@ class ArmazemSqlCipher implements ArmazemDoDia {
         await t.insert('anexo', {
           'id': f.id,
           'os_id': f.osId,
-          'parametro': f.parametro,
+          // A coluna é obrigatória desde a primeira versão: vazio é a foto de uma fase.
+          'parametro': f.parametro ?? '',
           'caminho': f.caminho,
           'tipo_midia': f.tipoMidia,
           'tamanho': f.tamanho,
@@ -318,7 +319,10 @@ class ArmazemSqlCipher implements ArmazemDoDia {
         FotoDaOs(
           id: l['id'] as String,
           osId: l['os_id'] as String,
-          parametro: l['parametro'] as String,
+          parametro: switch (l['parametro'] as String) {
+            '' => null,
+            final p => p,
+          },
           caminho: l['caminho'] as String,
           tipoMidia: l['tipo_midia'] as String,
           tamanho: l['tamanho'] as int,
